@@ -317,3 +317,4 @@
 (defn new-kafka-producer
   [config]
   (map->KafkaProducer {:config config}))
+
