@@ -17,7 +17,7 @@
                  [org.clojure/core.async "0.1.346.0-17112a-alpha"]
                  [com.stuartsierra/component "0.2.2"]
                  [com.taoensso/carmine "2.4.4"]
-                 [ru.prepor/utils "0.1.0-SNAPSHOT"]
+                 [ru.prepor/utils "0.1.0"]
                  [org.apache.zookeeper/zookeeper "3.4.0"
                   :exclusions [[com.sun.jmx/jmxri]
                                [com.sun.jdmk/jmxtools]
