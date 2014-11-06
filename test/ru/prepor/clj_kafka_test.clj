@@ -49,7 +49,7 @@
                                                        :topics ["test"]
                                                        :total-n 1
                                                        :current-n 0})
-        messages (async-res channels)]
+        messages (-> (async-res channels) :chan)]
     (kafka/send *kafka-producer* [{:topic "test" :key "1" :value "hello!"}])
 
     (let [res (async-res messages)]
@@ -66,7 +66,7 @@
                                                                :topics ["test"]
                                                                :total-n 1
                                                                :current-n 0})
-        messages (async-res channels)]
+        messages (-> (async-res channels) :chan)]
     (let [res (async-res messages)]
       ;; TODO key is broken?..
       ;; (is (= "1" (String. (:key res))))

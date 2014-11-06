@@ -187,10 +187,10 @@
                             topic (:topic t)
                             init-offset (init-offset kafka group topic p init-offsets)]]
                   (utils/safe-go
-                   (a/>! channels ch)
+                   (a/>! channels {:topic topic :partition (:id p) :init-offset init-offset
+                                   :chan ch})
                    (loop [partition p offset init-offset]
                      (when @running?
-                       ;; (log/trace "Check messages" topic (:id partition) offset)
                        (let [[messages partition offset]
                              (partition-messages kafka topic partition offset)]
                          (if (seq messages)
@@ -222,7 +222,9 @@
                   topic (:topic t)
                   init-offset (init-offset kafka group topic p :earliest)
                   last-offset (init-offset* kafka topic p :latest)]]
-      (a/put! channels ch)
+      (a/put! channels {:topic topic :partition (:id p)
+                        :init-offset init-offset :last-offset last-offset
+                        :chan ch})
       (utils/safe-go
        (loop [partition p offset init-offset]
          (when (< offset last-offset)
@@ -246,7 +248,7 @@
          (let [[v port] (a/alts! channels-for-read)]
            (cond
             (nil? v) (recur (-> (set channels-for-read) (disj port) vec))
-            (= channels port) (recur (conj channels-for-read v))
+            (= channels port) (recur (conj channels-for-read (:chan v)))
             :else (do (a/>! out v) (recur channels-for-read))))
          (a/close! out))))
     out))
@@ -317,4 +319,3 @@
 (defn new-kafka-producer
   [config]
   (map->KafkaProducer {:config config}))
-
