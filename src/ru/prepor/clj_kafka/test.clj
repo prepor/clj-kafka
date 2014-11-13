@@ -71,8 +71,8 @@
           topic (:topic config)]
       (try
         (.startup kafka)
-        (let [zk-client (ZkClient. (str "127.0.0.1:" (:zookeeper-port config))
-                                   500 500 string-serializer)]
+        (with-open [zk-client (ZkClient. (str "127.0.0.1:" (:zookeeper-port config))
+                                         500 500 string-serializer)]
           (create-topic zk-client topic)
           (wait-until-initialised kafka topic)
           (f))
@@ -80,5 +80,3 @@
                      (.awaitShutdown kafka)
                      (.stop zk)
                      (FileUtils/deleteDirectory (io/file (tmp-dir)))))))))
-
-
