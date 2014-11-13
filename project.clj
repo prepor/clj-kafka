@@ -29,4 +29,5 @@
                  [org.apache.curator/curator-test "2.6.0"]]
   :profiles {:dev {:dependencies [[org.slf4j/slf4j-api "1.7.7"]
                                   [ch.qos.logback/logback-classic "1.1.2"]
-                                  [org.slf4j/log4j-over-slf4j "1.7.7"]]}})
+                                  [org.slf4j/log4j-over-slf4j "1.7.7"]]}}
+  :lein-release {:deploy-via :clojars})
