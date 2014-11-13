@@ -1,7 +1,7 @@
 (ns ru.prepor.clj-kafka
   (:require [clojure.string :as str]
             [com.stuartsierra.component :as component]
-            [taoensso.timbre :as log]
+            [clojure.tools.logging :as log]
             [ru.prepor.utils :as utils]
             [clojure.core.async :as a]
             [taoensso.carmine :as car :refer (wcar)]
@@ -68,7 +68,7 @@
       (try
         (apply f consumer args)
         (catch Exception e
-          (log/warn (format "Error while request to broker %s: %s" broker (.getMessage e)))))
+          (log/warnf "Error while request to broker %s: %s" broker (.getMessage e))))
       (do (locking pool
             (swap! pool assoc k (SimpleConsumer. (:host broker) (:port broker)
                                                  100000 (* 64 1024)
@@ -150,9 +150,9 @@
     (if (or (nil? res) (.hasError res))
       ;; in case of error just returns empty messages coll and reinit broker's info
       (do
-        (log/warn (format "Error (%s) while fetching messages for topic %s partition %s offset %s from %s"
-                          (when res (.errorCode res topic (:id partition)))
-                          topic (:id partition) offset (:leader partition)))
+        (log/warnf "Error (%s) while fetching messages for topic %s partition %s offset %s from %s"
+                  (when res (.errorCode res topic (:id partition)))
+                  topic (:id partition) offset (:leader partition))
         [[] (refresh-partition kafka topic (:id partition)) offset])
       (let [messages (-> res (.messageSet topic (:id partition))
                          (.iterator) iterator-seq
@@ -206,7 +206,7 @@
       (a/go-loop []
         (when-let [v (a/<! threads-ch)]
           (when (utils/throwable? v)
-            (log/error v (format "Stop kafka consumer %s" topics))
+            (log/errorf v "Stop kafka consumer %s" topics)
             (stop!))
           (recur))))
     [stop! channels]))
