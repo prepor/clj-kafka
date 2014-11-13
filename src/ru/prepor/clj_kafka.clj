@@ -171,6 +171,32 @@
                  (recur (concat res messages) partition offset)
                  res))))))
 
+(defn constant-partition
+  [kafka topic-metadata partition channels control-ch {:keys [group init-offsets]}]
+  (let [ch (a/chan 100)
+        topic (:topic topic-metadata)
+        init-offset (init-offset kafka group topic partition init-offsets)]
+    (utils/safe-go
+     (a/>! channels {:topic topic :partition (:id partition) :init-offset init-offset
+                     :chan ch})
+     (loop [partition partition offset init-offset]
+       (let [[messages partition offset]
+             (partition-messages kafka topic partition offset)
+             tick-result
+             (if (seq messages)
+               (loop [[m & messages] messages]
+                 (if m
+                   (a/alt!
+                     [[ch m]] ([] (recur messages))
+                     control-ch :stopped)
+                   :next))
+               (a/alt!
+                 (a/timeout 1000) :next
+                 control-ch :stopped))]
+         (case tick-result
+           :next (recur partition offset)
+           :stopped (a/close! ch)))))))
+
 (defn constant-supervisor
   "The most primitive implementation of distributive client. Based on total-n and
   current-n configuration, without any automatic rebalancing.
@@ -178,28 +204,15 @@
   blocking."
   [kafka {:keys [group topics total-n current-n init-offsets] :or {init-offsets :latest}}]
   (let [m (topics-metadata kafka topics)
-        running? (atom true)
         channels (a/chan)
+        control-ch (a/chan)
         threads (for [t m
                       p (:partition-metadata t)
-                      :when (= current-n (mod (:id p) total-n))
-                      :let [ch (a/chan 100)
-                            topic (:topic t)
-                            init-offset (init-offset kafka group topic p init-offsets)]]
-                  (utils/safe-go
-                   (a/>! channels {:topic topic :partition (:id p) :init-offset init-offset
-                                   :chan ch})
-                   (loop [partition p offset init-offset]
-                     (when @running?
-                       (let [[messages partition offset]
-                             (partition-messages kafka topic partition offset)]
-                         (if (seq messages)
-                           (doseq [m messages]
-                             (a/>! ch m))
-                           (a/<! (a/timeout 1000)))
-                         (recur partition offset))))
-                   (a/close! ch)))
-        stop! (fn [] (reset! running? false) (a/close! channels))]
+                      :when (= current-n (mod (:id p) total-n))]
+                  (constant-partition kafka t p channels control-ch
+                                      {:group group
+                                       :init-offsets init-offsets}))
+        stop! (fn [] (a/close! control-ch) (a/close! channels))]
     (doall threads)
     ;; Closes all channels on first failure
     (let [threads-ch (a/merge threads)]
