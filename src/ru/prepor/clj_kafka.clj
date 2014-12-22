@@ -327,8 +327,7 @@
     (let [producer (.borrowObject pool)]
       (try
         (.send producer (for [{:keys [topic key value]} messages]
-                          (KeyedMessage. topic
-                                         (if (string? key) (.getBytes key) key)
+                          (KeyedMessage. topic key
                                          (if (string? value) (.getBytes value) value))))
         (finally
           (.returnObject pool producer))))))
