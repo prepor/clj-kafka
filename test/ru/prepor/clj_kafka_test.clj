@@ -68,8 +68,7 @@
                                                                :current-n 0})
         messages (-> (async-res channels) :chan)]
     (let [res (async-res messages)]
-      ;; TODO key is broken?..
-      ;; (is (= "1" (String. (:key res))))
+      (is (= "1" (String. (:key res))))
       (is (= "hello2!" (String. (:value res)))))
     (close-f)))
 

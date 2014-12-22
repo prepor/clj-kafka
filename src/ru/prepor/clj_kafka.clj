@@ -142,17 +142,21 @@
         to-message (fn [m]
                      (let [offset (.offset m)
                            msg (.message m)
-                           bb (.payload msg)
-                           b (byte-array (.remaining bb))]
-                       (.get bb b)
-                       (Message. topic offset (:id partition) (.key msg) b kafka)))
+                           payload-byte-buffer (.payload msg)
+                           payload-byte-array (byte-array (.remaining payload-byte-buffer))
+                           key-byte-buffer (.key msg)
+                           key-byte-array (byte-array (.remaining key-byte-buffer))]
+                       (.get payload-byte-buffer payload-byte-array)
+                       (.get key-byte-buffer key-byte-array)
+                       (Message. topic offset (:id partition)
+                                 key-byte-array payload-byte-array kafka)))
         res (request kafka (:leader partition) #(.fetch % req))]
     (if (or (nil? res) (.hasError res))
       ;; in case of error just returns empty messages coll and reinit broker's info
       (do
         (log/warnf "Error (%s) while fetching messages for topic %s partition %s offset %s from %s"
-                  (when res (.errorCode res topic (:id partition)))
-                  topic (:id partition) offset (:leader partition))
+                   (when res (.errorCode res topic (:id partition)))
+                   topic (:id partition) offset (:leader partition))
         [[] (refresh-partition kafka topic (:id partition)) offset])
       (let [messages (-> res (.messageSet topic (:id partition))
                          (.iterator) iterator-seq
