@@ -9,7 +9,7 @@
 
                  [org.clojure/clojure "1.6.0"]
                  [org.clojure/tools.logging "0.3.1"]
-                 [clj-kafka "0.2.6-0.8"
+                 [clj-kafka "0.2.8-0.8.1.1"
                   :exclusions [[log4j]
                                [org.slf4j/slf4j-simple]]]
                  [org.apache.commons/commons-pool2 "2.2"]

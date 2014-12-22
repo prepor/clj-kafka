@@ -4,7 +4,7 @@
            [org.I0Itec.zkclient.serialize ZkSerializer]
            [org.apache.curator.test TestingServer]
            [kafka.common TopicAndPartition]
-           [kafka.admin CreateTopicCommand]
+           [kafka.admin AdminUtils]
            [kafka.server KafkaConfig KafkaServer]
            [org.apache.commons.io FileUtils])
   (:require [clojure.java.io :as io]))
@@ -40,14 +40,14 @@
 
 (defn wait-until-initialised
   [kafka-server topic]
-  (let [topic-and-partition (TopicAndPartition. topic 0)]
-    (while (not (.. kafka-server apis leaderCache keySet (contains topic-and-partition)))
+  (let [cache (-> kafka-server .apis .metadataCache)]
+    (while (not (.containsTopicAndPartition cache topic 0))
       (Thread/sleep 500))))
 
 (defn create-topic
   [zk-client topic & {:keys [partitions replicas]
                       :or   {partitions 1 replicas 1}}]
-  (CreateTopicCommand/createTopic zk-client topic partitions replicas ""))
+  (AdminUtils/createTopic zk-client topic partitions replicas (Properties.)))
 
 (def string-serializer (proxy [ZkSerializer] []
                          (serialize [data] (.getBytes data "UTF-8"))
