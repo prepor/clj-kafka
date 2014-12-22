@@ -1,4 +1,5 @@
 # ru.prepor.clj-kafka
+[![Travis status](https://secure.travis-ci.org/prepor/clj-kafka.png)](http://travis-ci.org/prepor/clj-kafka)
 
 ## License
 

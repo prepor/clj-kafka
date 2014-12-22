@@ -302,8 +302,8 @@
       (DefaultPooledObject.
         (kafka-producer/producer
          {"metadata.broker.list" (clojure.string/join "," (:brokers-list config))
-          "serializer.class" "kafka.serializer.DefaultEncoder"
-          "partitioner.class" "kafka.producer.DefaultPartitioner"
+          "serializer.class" (get config :serializer "kafka.serializer.StringEncoder")
+          "partitioner.class" (get config :partitioner "kafka.producer.DefaultPartitioner")
           "request.required.acks" "1"})))
     (destroyObject [_ pooled-obj]
       (.close (.getObject pooled-obj)))
@@ -327,8 +327,7 @@
     (let [producer (.borrowObject pool)]
       (try
         (.send producer (for [{:keys [topic key value]} messages]
-                          (KeyedMessage. topic key
-                                         (if (string? value) (.getBytes value) value))))
+                          (KeyedMessage. topic key value)))
         (finally
           (.returnObject pool producer))))))
 
