@@ -1,4 +1,4 @@
-(defproject ru.prepor/clj-kafka "0.2.2"
+(defproject ru.prepor/clj-kafka "0.2.3-SNAPSHOT"
   :description "FIXME: write description"
   :url "http://example.com/FIXME"
   :license {:name "Eclipse Public License"
