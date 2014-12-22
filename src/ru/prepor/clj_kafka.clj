@@ -145,9 +145,11 @@
                            payload-byte-buffer (.payload msg)
                            payload-byte-array (byte-array (.remaining payload-byte-buffer))
                            key-byte-buffer (.key msg)
-                           key-byte-array (byte-array (.remaining key-byte-buffer))]
+                           key-byte-array (when key-byte-buffer
+                                            (byte-array (.remaining key-byte-buffer)))]
                        (.get payload-byte-buffer payload-byte-array)
-                       (.get key-byte-buffer key-byte-array)
+                       (when key-byte-buffer
+                         (.get key-byte-buffer key-byte-array))
                        (Message. topic offset (:id partition)
                                  key-byte-array payload-byte-array kafka)))
         res (request kafka (:leader partition) #(.fetch % req))]
