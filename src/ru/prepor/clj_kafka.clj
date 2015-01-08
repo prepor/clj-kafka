@@ -169,6 +169,7 @@
   [kafka topic]
   (apply concat
          (for [p (-> (topics-metadata kafka [topic]) first :partition-metadata)
+               :when p
                :let [init-offset (init-offset* kafka topic p :earliest)]]
            (loop [res [] partition p offset init-offset]
              (let [[messages partition offset]
@@ -306,6 +307,7 @@
          {"metadata.broker.list" (clojure.string/join "," (:brokers-list config))
           "serializer.class" (get config :serializer "kafka.serializer.StringEncoder")
           "partitioner.class" (get config :partitioner "kafka.producer.DefaultPartitioner")
+          "producer.type" "sync"
           "request.required.acks" "1"})))
     (destroyObject [_ pooled-obj]
       (.close (.getObject pooled-obj)))
@@ -336,3 +338,4 @@
 (defn new-kafka-producer
   [config]
   (map->KafkaProducer {:config config}))
+

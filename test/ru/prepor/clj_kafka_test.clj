@@ -8,8 +8,7 @@
             [clojure.test :refer :all]))
 
 (def broker-config {:zookeeper-port 2182
-                    :kafka-port 9093
-                    :topic "test"})
+                    :kafka-port 9093})
 
 (def config {:redis {:pool {} :spec {:host "127.0.0.1" :port 6379 :db 5}}
              :brokers-list ["localhost:9093"]})
@@ -44,12 +43,15 @@
   (test-kafka/with-test-broker broker-config) with-components)
 
 (deftest basic
+  (kafka/send *kafka-producer* [{:topic "test" :key "1" :value "init message"}])
+
   (let [[close-f channels] (kafka/constant-supervisor *kafka*
                                                       {:group "test"
                                                        :topics ["test"]
                                                        :total-n 1
                                                        :current-n 0})
         messages (-> (async-res channels) :chan)]
+
     (kafka/send *kafka-producer* [{:topic "test" :key "1" :value "hello!"}])
 
     (let [res (async-res messages)]
@@ -60,7 +62,7 @@
     (is (nil? (async-res messages)))
     (is (nil? (async-res channels))))
 
-  (kafka/send *kafka-producer* [{:topic "test" :key "1" :value "hello2!"}])
+  (kafka/send *kafka-producer* [{:topic "test" :key "1" :value "привет!"}])
 
   (let [[close-f channels] (kafka/constant-supervisor *kafka* {:group "test"
                                                                :topics ["test"]
@@ -69,7 +71,7 @@
         messages (-> (async-res channels) :chan)]
     (let [res (async-res messages)]
       (is (= "1" (String. (:key res))))
-      (is (= "hello2!" (String. (:value res)))))
+      (is (= "привет!" (String. (:value res)))))
     (close-f)))
 
 (deftest all-messages

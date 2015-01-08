@@ -34,20 +34,10 @@
                      "enable.zookeeper" "true"
                      "log.flush.interval.messages" "1"
                      "auto.create.topics.enable" "true"
+                     "default.replication.factor" "1"
                      "log.dir" (.getAbsolutePath (io/file (tmp-dir "kafka-log")))}]
     (KafkaServer. (KafkaConfig. (as-properties (assoc base-config "port" (str kafka-port))))
                   system-time)))
-
-(defn wait-until-initialised
-  [kafka-server topic]
-  (let [cache (-> kafka-server .apis .metadataCache)]
-    (while (not (.containsTopicAndPartition cache topic 0))
-      (Thread/sleep 500))))
-
-(defn create-topic
-  [zk-client topic & {:keys [partitions replicas]
-                      :or   {partitions 1 replicas 1}}]
-  (AdminUtils/createTopic zk-client topic partitions replicas (Properties.)))
 
 (def string-serializer (proxy [ZkSerializer] []
                          (serialize [data] (.getBytes data "UTF-8"))
@@ -64,17 +54,13 @@
   (fn [f]
     (FileUtils/deleteDirectory (io/file (tmp-dir)))
     (let [config (or config {:zookeeper-port 2182
-                             :kafka-port 9093
-                             :topic "test"})
+                             :kafka-port 9093})
           zk (create-zookeeper config)
-          kafka (create-broker config)
-          topic (:topic config)]
+          kafka (create-broker config)]
       (try
         (.startup kafka)
         (with-open [zk-client (ZkClient. (str "127.0.0.1:" (:zookeeper-port config))
                                          500 500 string-serializer)]
-          (create-topic zk-client topic)
-          (wait-until-initialised kafka topic)
           (f))
         (finally (do (.shutdown kafka)
                      (.awaitShutdown kafka)
