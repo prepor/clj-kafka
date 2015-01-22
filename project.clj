@@ -1,4 +1,4 @@
-(defproject ru.prepor/clj-kafka "0.2.6-SNAPSHOT"
+(defproject ru.prepor/clj-kafka "0.3.0-SNAPSHOT"
   :description "FIXME: write description"
   :url "http://example.com/FIXME"
   :license {:name "Eclipse Public License"
@@ -26,7 +26,8 @@
                                [org.slf4j/slf4j-log4j12]
                                [org.slf4j/slf4j-simple]
                                [log4j]]]
-                 [org.apache.curator/curator-test "2.6.0"]]
+                 [org.apache.curator/curator-recipes "2.7.0"]
+                 [org.apache.curator/curator-test "2.7.0"]]
   :profiles {:dev {:dependencies [[org.slf4j/slf4j-api "1.7.7"]
                                   [ch.qos.logback/logback-classic "1.1.2"]
                                   [org.slf4j/log4j-over-slf4j "1.7.7"]]}}

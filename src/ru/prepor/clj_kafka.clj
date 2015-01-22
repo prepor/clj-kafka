@@ -1,26 +1,44 @@
 (ns ru.prepor.clj-kafka
-  (:require [clojure.string :as str]
-            [com.stuartsierra.component :as component]
-            [clojure.tools.logging :as log]
-            [ru.prepor.utils :as utils]
+  (:require [clj-kafka.producer :as kafka-producer]
             [clojure.core.async :as a]
-            [taoensso.carmine :as car :refer (wcar)]
-            [clj-kafka.producer :as kafka-producer])
+            [clojure.string :as str]
+            [clojure.tools.logging :as log]
+            [com.stuartsierra.component :as component]
+            [ru.prepor.utils :as utils]
+            [taoensso.carmine :as car :refer (wcar)])
   (:import [java.nio ByteBuffer]
            [java.util Properties HashMap]
-           [kafka.common TopicAndPartition]
            [kafka.api FetchRequestBuilder PartitionOffsetRequestInfo]
-           [kafka.message MessageAndMetadata MessageAndOffset]
+           [kafka.cluster Broker]
+           [kafka.common TopicAndPartition]
            [kafka.javaapi OffsetResponse PartitionMetadata TopicMetadata
             TopicMetadataResponse TopicMetadataRequest OffsetRequest]
-           [kafka.cluster Broker]
-           [kafka.producer KeyedMessage]
            [kafka.javaapi.consumer SimpleConsumer]
+           [kafka.message MessageAndMetadata MessageAndOffset]
+           [kafka.producer KeyedMessage]
            [org.apache.commons.pool2 PooledObjectFactory]
-           [org.apache.commons.pool2.impl GenericObjectPool DefaultPooledObject])
+           [org.apache.commons.pool2.impl GenericObjectPool DefaultPooledObject]
+           [org.apache.curator.framework CuratorFrameworkFactory]
+           [org.apache.curator.retry ExponentialBackoffRetry])
   (:refer-clojure :exclude [send]))
 
-(defrecord Message [topic offset partition key value kafka])
+(defrecord Message [kafka ack-clb group topic partition offset key value])
+
+(defprotocol OffsetsStorage
+  (offset-read [this group topic partition-id])
+  (offset-write [this group topic partition-id offset]))
+
+(defn ack
+  [message]
+  (when-let [clb (:ack-clb message)]
+    (clb message)))
+
+(defn commit
+  [message]
+  (offset-write (get-in message [:kafka :storage])
+                (:group message) (:topic message) (:partition message)
+                (inc (:offset message)))
+  (ack message))
 
 (defn as-properties
   [m]
@@ -93,8 +111,8 @@
 (defn refresh-partition
   [kafka topic partition-id]
   (let [m (topics-metadata kafka [topic])
-        topic (some #(when (= topic (:topic %)) %) m)
-        partition (some #(when (= partition-id (:id %)) %) (:partition-metadata topic))]
+        topic-meta (some #(when (= topic (:topic %)) %) m)
+        partition (some #(when (= partition-id (:id %)) %) (:partition-metadata topic-meta))]
     (when-not partition
       (throw (Exception. (format "Can't find new broker for topic %s parition %s in %s"
                                  topic partition-id m))))
@@ -110,31 +128,13 @@
     (let [response (request kafka (:leader partition) #(.getOffsetsBefore % req))]
       (first (.offsets response topic (:id partition))))))
 
-(defn offset-key
-  [group topic partition-id]
-  (format "kafka-offsets:%s-%s-%s" group topic partition-id))
-
-(defn read-offset
-  [kafka group topic partition-id]
-  (when-let [res (wcar (:redis kafka) (car/get (offset-key group topic partition-id)))]
-    (Long/valueOf res)))
-
-(defn commit-offset
-  [kafka group topic partition-id offset]
-  (wcar (:redis kafka) (car/set (offset-key group topic partition-id) offset)))
-
-(defn commit-message
-  [group message]
-  (commit-offset (:kafka message) group (:topic message) (:partition message)
-                 (inc (:offset message))))
-
 (defn init-offset
   [kafka group topic partition offset-position]
-  (or (read-offset kafka group topic (:id partition))
+  (or (offset-read (:storage kafka) group topic (:id partition))
       (init-offset* kafka topic partition offset-position)))
 
 (defn partition-messages
-  [kafka topic partition offset]
+  [kafka topic partition offset & [{:keys [ack-clb group]}]]
   (let [req (-> (FetchRequestBuilder.)
                 (.clientId (format "flock-clj-%s-%s" topic (:id partition)))
                 (.addFetch topic (:id partition) offset 1000000)
@@ -150,8 +150,14 @@
                        (.get payload-byte-buffer payload-byte-array)
                        (when key-byte-buffer
                          (.get key-byte-buffer key-byte-array))
-                       (Message. topic offset (:id partition)
-                                 key-byte-array payload-byte-array kafka)))
+                       (map->Message {:kafka kafka
+                                      :group group
+                                      :ack-clb ack-clb
+                                      :topic topic
+                                      :offset offset
+                                      :partition (:id partition)
+                                      :key key-byte-array
+                                      :value payload-byte-array})))
         res (request kafka (:leader partition) #(.fetch % req))]
     (if (or (nil? res) (.hasError res))
       ;; in case of error just returns empty messages coll and reinit broker's info
@@ -178,58 +184,36 @@
                  (recur (concat res messages) partition offset)
                  res))))))
 
-(defn constant-partition
-  [kafka topic-metadata partition channels control-ch {:keys [group init-offsets]}]
-  (let [ch (a/chan 100)
-        topic (:topic topic-metadata)
-        init-offset (init-offset kafka group topic partition init-offsets)]
-    (utils/safe-go
-     (a/>! channels {:topic topic :partition (:id partition) :init-offset init-offset
-                     :chan ch})
-     (loop [partition partition offset init-offset]
-       (let [[messages partition offset]
-             (partition-messages kafka topic partition offset)
-             tick-result
-             (if (seq messages)
-               (loop [[m & messages] messages]
-                 (if m
-                   (a/alt!
-                     [[ch m]] ([] (recur messages))
-                     control-ch :stopped)
-                   :next))
-               (a/alt!
-                 (a/timeout 1000) :next
-                 control-ch :stopped))]
-         (case tick-result
-           :next (recur partition offset)
-           :stopped (a/close! ch)))))))
-
-(defn constant-supervisor
-  "The most primitive implementation of distributive client. Based on total-n and
-  current-n configuration, without any automatic rebalancing.
-  Requests are executed in go-blocks thread-pool, with blocking IO, but without _wait-for_
-  blocking."
-  [kafka {:keys [group topics total-n current-n init-offsets] :or {init-offsets :latest}}]
-  (let [m (topics-metadata kafka topics)
-        channels (a/chan)
-        control-ch (a/chan)
-        threads (for [t m
-                      p (:partition-metadata t)
-                      :when (= current-n (mod (:id p) total-n))]
-                  (constant-partition kafka t p channels control-ch
-                                      {:group group
-                                       :init-offsets init-offsets}))
-        stop! (fn [] (a/close! control-ch) (a/close! channels))]
-    (doall threads)
-    ;; Closes all channels on first failure
-    (let [threads-ch (a/merge threads)]
-      (a/go-loop []
-        (when-let [v (a/<! threads-ch)]
-          (when (utils/throwable? v)
-            (log/errorf v "Stop kafka consumer %s" topics)
-            (stop!))
-          (recur))))
-    [stop! channels]))
+(defn partition-consumer
+  "Returns the core.async's channel. Stops consuming after control-ch closed"
+  [kafka {:keys [topic partition control-ch ack-clb group init-offsets buf-or-n]}]
+  (let [ch (a/chan buf-or-n)
+        partition-meta (refresh-partition kafka topic partition)
+        init-offset (init-offset kafka group topic partition-meta init-offsets)]
+    (a/go
+      (try
+        (loop [partition-meta partition-meta offset init-offset]
+          (let [[messages partition-meta offset]
+                (partition-messages kafka topic partition-meta offset {:ack-clb ack-clb
+                                                                       :group group})
+                tick-result
+                (if (seq messages)
+                  (loop [[m & messages] messages]
+                    (if m
+                      (a/alt!
+                        [[ch m]] ([] (recur messages))
+                        control-ch :stopped)
+                      :next))
+                  (a/alt!
+                    (a/timeout 1000) :next
+                    control-ch :stopped))]
+            (case tick-result
+              :next (recur partition-meta offset)
+              :stopped (a/close! ch))))
+        (catch Exception e
+          (log/error e "Error while consuming" group topic partition-meta)
+          (a/close! ch))))
+    [init-offset ch]))
 
 (defn all-messages
   "Receives all messages in topics at the moment of call. After that closes channels"
@@ -279,19 +263,42 @@
         p (:partition-metadata t)
         :let [topic (:topic t)
               log (init-offset* kafka topic p :latest)
-              offset (or (read-offset kafka group topic (:id p)) 0)]
+              offset (or (offset-read (:storage kafka) group topic (:id p)) 0)]
         :let [lag (- log offset)]]
     {:topic topic :partition (:id p) :offset offset :log log :lag lag}))
 
-(defrecord Kafka [config pool redis]
+(defn redis-offset-key
+  [group topic partition-id]
+  (format "kafka-offsets:%s-%s-%s" group topic partition-id))
+
+(defn new-redis
+  [config]
+  (reify OffsetsStorage
+    (offset-read [_ group topic partition-id]
+      (when-let [res (wcar config (car/get (redis-offset-key group topic partition-id)))]
+        (Long/valueOf res)))
+    (offset-write [_ group topic partition-id offset]
+      (wcar config (car/set (redis-offset-key group topic partition-id) offset)))))
+
+(defrecord Kafka [config pool storage curator]
   component/Lifecycle
   (start [this]
     (assoc this
       :pool (atom {})
-      :redis (-> config :redis)))
+      :curator (delay (-> (CuratorFrameworkFactory/builder)
+                          (.namespace (get-in config [:zookeeper :namespace]))
+                          (.connectString (get-in config [:zookeeper :connect-string]))
+                          (.retryPolicy (ExponentialBackoffRetry. 100 10))
+                          (.build)
+                          (doto (.start) (.blockUntilConnected))))
+      :storage (cond
+                (get-in config [:storage :redis])
+                (new-redis (get-in config [:storage :redis])))))
   (stop [this]
     (doseq [[_ v] @pool]
       (.close v))
+    (when (realized? curator)
+      (.close @curator))
     this))
 
 (defn new-kafka
@@ -338,4 +345,3 @@
 (defn new-kafka-producer
   [config]
   (map->KafkaProducer {:config config}))
-

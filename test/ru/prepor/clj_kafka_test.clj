@@ -1,78 +1,43 @@
 (ns ru.prepor.clj-kafka-test
   (:require [ru.prepor.clj-kafka :as kafka]
-            [ru.prepor.clj-kafka.test :as test-kafka]
             [ru.prepor.utils :as utils]
             [clojure.core.async :as a]
-            [taoensso.carmine :as car :refer [wcar]]
-            [com.stuartsierra.component :as component]
+            [ru.prepor.clj-kafka.test-utils :refer [with-env *kafka-producer* *kafka*
+                                                    async-res]]
             [clojure.test :refer :all]))
 
-(def broker-config {:zookeeper-port 2182
-                    :kafka-port 9093})
+(use-fixtures :each with-env)
 
-(def config {:redis {:pool {} :spec {:host "127.0.0.1" :port 6379 :db 5}}
-             :brokers-list ["localhost:9093"]})
-(def producer-config {:brokers-list ["localhost:9093"]})
-
-(defn async-res
-  ([ch] (async-res ch 5))
-  ([ch seconds]
-     (a/alt!!
-       (a/timeout (* seconds 5000)) (throw (Exception. "Timeout"))
-       ch ([v ch] (utils/safe-res v)))))
-
-(defn with-truncated-redis
-  [f]
-  (wcar (:redis config) (car/flushall))
-  (f))
-
-(def ^:dynamic *kafka*)
-(def ^:dynamic *kafka-producer*)
-
-(defn with-components
-  [f]
-  (binding [*kafka* (component/start (kafka/new-kafka config))
-            *kafka-producer* (component/start (kafka/new-kafka-producer producer-config))]
-    (try
-      (f)
-      (finally
-        (component/stop *kafka*)
-        (component/stop *kafka-producer*)))))
-
-(use-fixtures :each with-truncated-redis
-  (test-kafka/with-test-broker broker-config) with-components)
+(def consumer-params {:group "test"
+                      :topic "test"
+                      :partition 0
+                      :init-offsets :latest})
 
 (deftest basic
   (kafka/send *kafka-producer* [{:topic "test" :key "1" :value "init message"}])
 
-  (let [[close-f channels] (kafka/constant-supervisor *kafka*
-                                                      {:group "test"
-                                                       :topics ["test"]
-                                                       :total-n 1
-                                                       :current-n 0})
-        messages (-> (async-res channels) :chan)]
-
+  (let [control-ch (a/chan)
+        [init-offset messages] (kafka/partition-consumer *kafka* (assoc consumer-params
+                                                                   :control-ch control-ch))]
+    (is (= 1 init-offset))
     (kafka/send *kafka-producer* [{:topic "test" :key "1" :value "hello!"}])
 
     (let [res (async-res messages)]
       (is (= "hello!" (String. (:value res))))
-      (kafka/commit-message "test" res))
+      (kafka/commit res))
 
-    (close-f)
-    (is (nil? (async-res messages)))
-    (is (nil? (async-res channels))))
+    (a/close! control-ch)
+    (is (nil? (async-res messages))))
 
   (kafka/send *kafka-producer* [{:topic "test" :key "1" :value "привет!"}])
 
-  (let [[close-f channels] (kafka/constant-supervisor *kafka* {:group "test"
-                                                               :topics ["test"]
-                                                               :total-n 1
-                                                               :current-n 0})
-        messages (-> (async-res channels) :chan)]
-    (let [res (async-res messages)]
-      (is (= "1" (String. (:key res))))
-      (is (= "привет!" (String. (:value res)))))
-    (close-f)))
+  (let [control-ch (a/chan)
+        [_ messages] (kafka/partition-consumer *kafka* (assoc consumer-params
+                                                     :control-ch control-ch))
+        res (async-res messages)]
+    (is (= "1" (String. (:key res))))
+    (is (= "привет!" (String. (:value res))))
+    (a/close! control-ch)))
 
 (deftest all-messages
   (kafka/send *kafka-producer* [{:topic "test" :key "1" :value "hello!"}])
