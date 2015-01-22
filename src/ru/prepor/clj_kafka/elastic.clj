@@ -26,7 +26,7 @@
                             (a/>!! out {:type :child-added
                                         :path (-> event .getData .getPath)})
                             PathChildrenCacheEvent$Type/CHILD_REMOVED
-                            (a/>!! out {:type :child-added
+                            (a/>!! out {:type :child-removed
                                         :path (-> event .getData .getPath)})
                             PathChildrenCacheEvent$Type/CONNECTION_LOST
                             (a/close! out)
@@ -94,22 +94,18 @@
                   (a/close! completed-wait-ch))
               (recur consumed-offset (a/<! acks-ch) true)))
         (a/alt!
+          acks-ch ([v] (recur consumed-offset v false))
           messages ([v] (if v
-                          (do (a/>! out v)
-                              (recur (:offset v) acked-offset false))
+                          (do
+                            (a/>! out v)
+                            (recur (:offset v) acked-offset false))
                           (do
                             (a/close! out)
                             (recur consumed-offset acked-offset true))))
-          acks-ch ([v] (recur consumed-offset v false)))))
+          :priority true)))
     [(fn [] (a/close! control-ch) completed-wait-ch)
      init-offset
      out]))
-
-(defn stop
-  [state]
-  (utils/safe-go
-   (doseq [consumer-stop (vals (:consumers state))]
-     (utils/<? (consumer-stop)))))
 
 (defn my-partitions
   [me everybody all-partitions]
@@ -122,9 +118,12 @@
 (defn changed-partitions
   [old new]
   (let [old* (set old)
-        new* (set new)]
-    {:added (set/difference new* old*)
-     :removed (set/difference old* new*)}))
+        new* (set new)
+        added (seq (set/difference new* old*))
+        removed (seq (set/difference old* new*))]
+    (cond-> {}
+            added (assoc :added added)
+            removed (assoc :removed removed))))
 
 (defn consumers-diff
   [me all-partitions consumers new-everybody]
@@ -146,13 +145,23 @@
 (defn apply-added
   [kafka base-params added]
   (let [[topic partition] added
-        consumer-params (assoc base-params :topic topic :partition partition)]
+        consumer-params (assoc base-params :topic topic :partition partition)
+        path (partition-path consumer-params)]
     (utils/safe-go
      (log/infof "Lock partition %s(%s) for myself" topic partition)
-     (utils/<? (zookeeper-until-create @(:curator kafka)
-                                       (partition-path consumer-params)))
-     (log/infof "Locking partition successful %s(%s)" topic partition)
-     (partition-consumer kafka consumer-params))))
+     (log/debug "Try to create zookeeper path" path)
+     (try
+       (->  @(:curator kafka)
+            .create
+            (.creatingParentsIfNeeded)
+            (.withMode CreateMode/EPHEMERAL)
+            (.forPath path))
+       (log/infof "Locking partition successful %s(%s)" topic partition)
+       (partition-consumer kafka consumer-params)
+       (catch KeeperException$NodeExistsException e
+         (log/warn "Zookeeper path already exists" path)
+         (a/<! (a/timeout 100))
+         nil)))))
 
 (defn apply-removed
   [kafka base-params removed stop-fn]
@@ -171,13 +180,14 @@
      (let [consumers-with-added
            (loop [consumers consumers [[topic partition :as added-one] & tail] (seq added)]
              (if added-one
-               (let [[stop-fn init-offset  out]
-                     (utils/<? (apply-added kafka base-params added-one))]
-                 (a/>! channels {:topic topic
-                                 :partition partition
-                                 :init-offset init-offset
-                                 :chan out})
-                 (recur (assoc consumers added-one stop-fn) tail))
+               (if-let [[stop-fn init-offset  out]
+                        (utils/<? (apply-added kafka base-params added-one))]
+                 (do (a/>! channels {:topic topic
+                                     :partition partition
+                                     :init-offset init-offset
+                                     :chan out})
+                     (recur (assoc consumers added-one stop-fn) tail))
+                 (recur consumers tail))
                consumers))]
        (loop [consumers consumers-with-added [removed-one & tail] (seq removed)]
          (if removed-one
@@ -209,38 +219,36 @@
         base-params {:group group
                      :init-offsets init-offsets
                      :buf-or-n buf-or-n}
-        close-wait-ch (a/chan)]
+        close-wait-ch (a/chan)
+        update-everybody (fn [state event]
+                           (if event
+                             (let [op (case (:type event)
+                                        :child-added #(sort (conj %1 %2))
+                                        :child-removed #(sort (disj (set %1) %2)))]
+                               (update-in state [:everybody] op (:path event)))
+                             (assoc state :everybody nil)))]
     (a/go
-      (let [init-state (try {:everybody sorted-everybody
-                             :consumers (->> (consumers-diff me partitions {} sorted-everybody)
-                                             (apply-diff kafka channels base-params {})
-                                             (utils/<?))}
-                            (catch Exception e
-                              e))]
-        (if (utils/throwable? init-state)
-          (do (log/error init-state "Error while consumer initializing" params)
-              (a/close! channels))
-          (loop [state init-state]
-            (if-let [event (a/<! consumer-changes)]
-              (case (:type event)
-                (:child-added :child-removed)
-                (let [everybody (sort (conj (:everybody state) (:path event)))
-                      consumers
-                      (try
-                        (->> (consumers-diff me partitions (:consumers state) everybody)
-                             (apply-diff kafka channels base-params (:consumers state))
-                             (utils/<?))
-                        (catch Exception e
-                          e))]
-                  (if (utils/throwable? consumers)
-                    (do (log/error consumers "Error in elastic consumer, stopped" params)
-                        (stop state))
-                    (recur {:everybody everybody :consumers consumers})))
-                (recur state))
-              (do (log/info "Stop consumer" params)
-                  (->> (stop-diff (:consumers state))
-                       (apply-diff kafka channels base-params (:consumers state))
-                       (utils/<?))
-                  (a/close! close-wait-ch)))))))
+      (loop [state {:everybody sorted-everybody :consumers {}}]
+        (if (:everybody state)
+          (if-let [diff (not-empty (consumers-diff me partitions
+                                                   (:consumers state) (:everybody state)))]
+            (let [new-state (a/alt!
+                              consumer-changes ([event] (update-everybody state event))
+                              :default
+                              (let [new-consumers
+                                    (->>
+                                     diff
+                                     (apply-diff kafka channels base-params (:consumers state))
+                                     (a/<!))]
+                                (if (utils/throwable? new-consumers)
+                                  (assoc state :everybody nil)
+                                  (assoc state :consumers new-consumers))))]
+              (recur new-state))
+            (recur (update-everybody state (a/<! consumer-changes))))
+          (do (log/info "Stop consumer" params)
+              (->> (stop-diff (:consumers state))
+                   (apply-diff kafka channels base-params (:consumers state))
+                   (utils/<?))
+              (a/close! close-wait-ch)))))
     [(fn [] (a/close! channels) (consumers-stop-fn) (a/<!! close-wait-ch))
      channels]))
