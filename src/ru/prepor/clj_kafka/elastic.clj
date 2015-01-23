@@ -232,18 +232,18 @@
         (if (:everybody state)
           (if-let [diff (not-empty (consumers-diff me partitions
                                                    (:consumers state) (:everybody state)))]
-            (let [new-state (a/alt!
-                              consumer-changes ([event] (update-everybody state event))
-                              :default
-                              (let [new-consumers
-                                    (->>
-                                     diff
-                                     (apply-diff kafka channels base-params (:consumers state))
-                                     (a/<!))]
-                                (if (utils/throwable? new-consumers)
-                                  (assoc state :everybody nil)
-                                  (assoc state :consumers new-consumers))))]
-              (recur new-state))
+            (let [[event _] (a/alts! [consumer-changes] :default :no)]
+              (case event
+                :no (let [new-consumers
+                          (->>
+                           diff
+                           (apply-diff kafka channels base-params (:consumers state))
+                           (a/<!))]
+                      (if (utils/throwable? new-consumers)
+                        (recur (assoc state :everybody nil))
+                        (recur (assoc state :consumers new-consumers))))
+                nil (recur (assoc state :everybody nil))
+                (recur (update-everybody state event))))
             (recur (update-everybody state (a/<! consumer-changes))))
           (do (log/info "Stop consumer" params)
               (->> (stop-diff (:consumers state))
