@@ -51,25 +51,6 @@
                       (recur (conj acc (:path v))))))]
        [stop-fn init changes]))))
 
-(defn zookeeper-until-create
-  [curator path]
-  (utils/safe-go
-   (log/debug "Try to create zookeeper path" path)
-   (loop []
-     (let [res (try
-                 (-> curator
-                     .create
-                     (.creatingParentsIfNeeded)
-                     (.withMode CreateMode/EPHEMERAL)
-                     (.forPath path))
-                 (catch KeeperException$NodeExistsException e
-                   e))]
-       (if (utils/throwable? res)
-         (do (log/warn "Zookeeper path already exists, trying again" path)
-             (a/<! (a/timeout 100))
-             (recur))
-         res)))))
-
 (defn partition-consumer
   "Same as partition consumer from core, but it wait ack of last consumed message on
   stop. Returns stop-fn and core.async's channel"
