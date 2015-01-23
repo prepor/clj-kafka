@@ -195,7 +195,8 @@
         me (introduce-myself kafka group)
         [consumers-stop-fn everybody consumer-changes]
         (utils/<??
-         (initialized-zookeeper-path @(:curator kafka) (format "/consumers/%s" group)))
+         (initialized-zookeeper-path @(:curator kafka) (format "/consumers/%s" group)
+                                     {:buf-or-n 10}))
         sorted-everybody (sort everybody)
         base-params {:group group
                      :init-offsets init-offsets
