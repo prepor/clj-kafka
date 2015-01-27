@@ -1,6 +1,5 @@
 (ns ru.prepor.clj-kafka.test-utils
-  (:require [ru.prepor.clj-kafka.test-utils :refer :all]
-            [clojure.test :as test]
+  (:require [clojure.test :as test]
             [ru.prepor.utils :as utils]
             [clojure.test :refer :all]
             [ru.prepor.clj-kafka :as kafka]

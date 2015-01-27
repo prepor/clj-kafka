@@ -169,6 +169,8 @@
       (let [messages (-> res (.messageSet topic (:id partition))
                          (.iterator) iterator-seq
                          (->> (mapv to-message)))]
+        (log/debugf "Received %s messages from %s(%s) with offset %s" (count messages)
+                    topic partition offset)
         [messages partition (if (seq messages) (inc (:offset (last messages))) offset)]))))
 
 (defn get-messages
@@ -190,6 +192,7 @@
   (let [ch (a/chan buf-or-n)
         partition-meta (refresh-partition kafka topic partition)
         init-offset (init-offset kafka group topic partition-meta init-offsets)]
+    (log/debug "Initialized parttion consumer" partition-meta init-offset)
     (a/go
       (try
         (loop [partition-meta partition-meta offset init-offset]
