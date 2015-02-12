@@ -19,7 +19,8 @@
            [org.apache.commons.pool2 PooledObjectFactory]
            [org.apache.commons.pool2.impl GenericObjectPool DefaultPooledObject]
            [org.apache.curator.framework CuratorFrameworkFactory]
-           [org.apache.curator.retry ExponentialBackoffRetry])
+           [org.apache.curator.retry ExponentialBackoffRetry]
+           [java.net InetAddress])
   (:refer-clojure :exclude [send]))
 
 (defrecord Message [kafka ack-clb group topic partition offset key value])
@@ -283,7 +284,7 @@
     (offset-write [_ group topic partition-id offset]
       (wcar config (car/set (redis-offset-key group topic partition-id) offset)))))
 
-(defrecord Kafka [config pool storage curator]
+(defrecord Kafka [config pool storage curator host]
   component/Lifecycle
   (start [this]
     (assoc this
@@ -296,7 +297,9 @@
                           (doto (.start) (.blockUntilConnected))))
       :storage (cond
                 (get-in config [:storage :redis])
-                (new-redis (get-in config [:storage :redis])))))
+                (new-redis (get-in config [:storage :redis])))
+      :host (-> (InetAddress/getLocalHost)
+                (.getHostName))))
   (stop [this]
     (doseq [[_ v] @pool]
       (.close v))
@@ -331,8 +334,8 @@
 (defrecord KafkaProducer [config pool]
   component/Lifecycle
   (start [this]
-    (assoc this :pool
-           (GenericObjectPool. (kafka-producer-factory config))))
+    (assoc this
+      :pool (GenericObjectPool. (kafka-producer-factory config))))
   (stop [this]
     (.close pool)
     this)

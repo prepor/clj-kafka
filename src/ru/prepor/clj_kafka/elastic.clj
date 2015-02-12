@@ -136,7 +136,7 @@
             .create
             (.creatingParentsIfNeeded)
             (.withMode CreateMode/EPHEMERAL)
-            (.forPath path))
+            (.forPath path (.getBytes (:host kafka))))
        (log/infof "Locking partition successful %s(%s)" topic partition)
        (partition-consumer kafka consumer-params)
        (catch KeeperException$NodeExistsException e
@@ -183,7 +183,7 @@
       .create
       (.creatingParentsIfNeeded)
       (.withMode CreateMode/EPHEMERAL_SEQUENTIAL)
-      (.forPath (format "/consumers/%s/consumer-" group))))
+      (.forPath (format "/consumers/%s/consumer-" group) (.getBytes (:host kafka)))))
 
 (defn consumer
   [kafka {:keys [group topics init-offsets buf-or-n] :as params :or {init-offsets :latest}}]
