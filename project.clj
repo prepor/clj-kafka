@@ -1,4 +1,4 @@
-(defproject ru.prepor/clj-kafka "0.3.4-SNAPSHOT"
+(defproject ru.prepor/clj-kafka "0.3.4"
   :description "FIXME: write description"
   :url "http://example.com/FIXME"
   :license {:name "Eclipse Public License"
@@ -18,6 +18,7 @@
                  [com.stuartsierra/component "0.2.2"]
                  [com.taoensso/carmine "2.4.4"]
                  [ru.prepor/utils "0.2.0"]
+                 [metrics-clojure "2.4.0"]
                  [org.apache.zookeeper/zookeeper "3.4.6"
                   :exclusions [[com.sun.jmx/jmxri]
                                [com.sun.jdmk/jmxtools]
