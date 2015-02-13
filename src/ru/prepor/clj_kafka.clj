@@ -5,6 +5,7 @@
             [clojure.tools.logging :as log]
             [com.stuartsierra.component :as component]
             [ru.prepor.utils :as utils]
+            [ru.prepor.clj-kafka.tracer :as tracer]
             [taoensso.carmine :as car :refer (wcar)])
   (:import [java.nio ByteBuffer]
            [java.util Properties HashMap]
@@ -170,8 +171,8 @@
       (let [messages (-> res (.messageSet topic (:id partition))
                          (.iterator) iterator-seq
                          (->> (mapv to-message)))]
-        (log/debugf "Received %s messages from %s(%s) with offset %s" (count messages)
-                    topic partition offset)
+        ;; (log/debugf "Received %s messages from %s(%s) with offset %s" (count messages)
+        ;;             topic partition offset)
         [messages partition (if (seq messages) (inc (:offset (last messages))) offset)]))))
 
 (defn get-messages
@@ -284,7 +285,7 @@
     (offset-write [_ group topic partition-id offset]
       (wcar config (car/set (redis-offset-key group topic partition-id) offset)))))
 
-(defrecord Kafka [config pool storage curator host]
+(defrecord Kafka [config pool storage curator host tracer]
   component/Lifecycle
   (start [this]
     (assoc this
@@ -299,7 +300,8 @@
                 (get-in config [:storage :redis])
                 (new-redis (get-in config [:storage :redis])))
       :host (-> (InetAddress/getLocalHost)
-                (.getHostName))))
+                (.getHostName))
+      :tracer (or (:tracer this) (tracer/nil-tracer))))
   (stop [this]
     (doseq [[_ v] @pool]
       (.close v))

@@ -3,6 +3,9 @@
             [ru.prepor.utils :as utils]
             [clojure.test :refer :all]
             [ru.prepor.clj-kafka :as kafka]
+            [ru.prepor.clj-kafka.tracers.pub :refer [pub-tracer]]
+            [ru.prepor.clj-kafka.tracers.state :refer [state-tracer]]
+            [ru.prepor.clj-kafka.tracers.log :refer [log-tracer]]
             [com.stuartsierra.component :as component]
             [taoensso.carmine :as car :refer [wcar]]
             [ru.prepor.clj-kafka.test :as test-kafka]
@@ -32,9 +35,14 @@
 (def ^:dynamic *kafka*)
 (def ^:dynamic *kafka-producer*)
 
+(defn tracer []
+  (-> (pub-tracer) (assoc :state (component/start (state-tracer))
+                          :log (component/start (log-tracer)))
+      (component/start)))
+
 (defn with-components
   [f]
-  (binding [*kafka* (component/start (kafka/new-kafka config))
+  (binding [*kafka* (component/start (assoc (kafka/new-kafka config) :tracer (tracer)))
             *kafka-producer* (component/start (kafka/new-kafka-producer producer-config))]
     (try
       (f)

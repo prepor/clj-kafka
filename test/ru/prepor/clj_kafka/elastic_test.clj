@@ -1,10 +1,11 @@
 (ns ru.prepor.clj-kafka.elastic-test
-  (:require [ru.prepor.clj-kafka.elastic :as elastic]
-            [ru.prepor.clj-kafka :as kafka]
-            [ru.prepor.clj-kafka.test-utils :refer [*kafka* *kafka-producer*
-                                                    with-env async-res]]
+  (:require [clojure.core.async :as a]
             [clojure.test :refer :all]
-            [clojure.core.async :as a]))
+            [ru.prepor.clj-kafka.tracers.state :as state-tracer]
+            [ru.prepor.clj-kafka :as kafka]
+            [ru.prepor.clj-kafka.elastic :as elastic]
+            [ru.prepor.clj-kafka.test-utils :refer [*kafka* *kafka-producer*
+                                                    with-env async-res]]))
 
 (use-fixtures :each with-env)
 
@@ -45,4 +46,26 @@
           (is (= "hi2!" (String. (:value res))))
           (kafka/commit res)))
       (consumer1-stop)
-      (consumer2-stop))))
+      (consumer2-stop)))
+
+  (testing "tracer"
+    (is (= {:partitions
+            {"test"
+             {"test1"
+              {0
+               {:wait-acks {:consumed 1, :acked 1, :lag 0},
+                :initialized-from-offset 1,
+                :state :completed}},
+              "test2"
+              {0
+               {:wait-acks {:consumed 2, :acked 2, :lag 0},
+                :initialized-from-offset 2,
+                :state :completed}},
+              "test3"
+              {0
+               {:wait-acks {:consumed nil, :acked nil, :lag 0},
+                :initialized-from-offset 1,
+                :state :completed}}}},
+            :consumers
+            {"test" {:topics ["test1" "test2" "test3"], :state :stopped}}}
+           (state-tracer/state (-> *kafka* :tracer :state))))))

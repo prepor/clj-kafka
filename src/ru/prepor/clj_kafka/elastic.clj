@@ -3,6 +3,7 @@
             [clojure.set :as set]
             [clojure.tools.logging :as log]
             [ru.prepor.clj-kafka :as core]
+            [ru.prepor.clj-kafka.tracer :as trace]
             [ru.prepor.utils :as utils])
   (:import [org.apache.curator.framework.recipes.cache PathChildrenCache
             PathChildrenCacheListener PathChildrenCache$StartMode PathChildrenCacheEvent$Type]
@@ -55,10 +56,13 @@
   "Same as partition consumer from core, but it wait ack of last consumed message on
   stop. Returns stop-fn and core.async's channel"
   [kafka {:keys [buf-or-n] :as params}]
-  (let [control-ch (a/chan)
+  (let [{:keys [topic partition group]} params
+        control-ch (a/chan)
         completed-wait-ch (a/chan)
         acks-ch (a/chan 10)
         ack-clb (fn [message]
+                  (trace/ack-received (:tracer kafka) (:group params) topic partition
+                                      (:offset message))
                   (a/>!! acks-ch (:offset message)))
         out (a/chan buf-or-n)
         [init-offset messages] (core/partition-consumer kafka (assoc params
@@ -67,8 +71,8 @@
                                                                 :buf-or-n 10))]
     (a/go-loop [consumed-offset nil acked-offset nil wait-last-ack? false]
       (if wait-last-ack?
-        (do (log/debugf "Partition %s(%s) wait ack. Consumed offset: %s Current acked: %s"
-                        (:topic params) (:partition params) consumed-offset acked-offset)
+        (do (trace/wait-acks-progress (:tracer kafka) group topic partition
+                                      consumed-offset acked-offset)
             (if (or (nil? consumed-offset)
                     (and acked-offset (<= consumed-offset acked-offset)))
               (do (a/close! acks-ch)
@@ -78,6 +82,8 @@
           acks-ch ([v] (recur consumed-offset v false))
           messages ([v] (if v
                           (do
+                            (trace/message-received
+                             (:tracer kafka) group topic partition (:offset v))
                             (a/>! out v)
                             (recur (:offset v) acked-offset false))
                           (do
@@ -129,15 +135,12 @@
         consumer-params (assoc base-params :topic topic :partition partition)
         path (partition-path consumer-params)]
     (utils/safe-go
-     (log/infof "Lock partition %s(%s) for myself" topic partition)
-     (log/debug "Try to create zookeeper path" path)
      (try
        (->  @(:curator kafka)
             .create
             (.creatingParentsIfNeeded)
             (.withMode CreateMode/EPHEMERAL)
             (.forPath path (.getBytes (:host kafka))))
-       (log/infof "Locking partition successful %s(%s)" topic partition)
        (partition-consumer kafka consumer-params)
        (catch KeeperException$NodeExistsException e
          (log/warn "Zookeeper path already exists" path)
@@ -149,26 +152,32 @@
   (let [[topic partition] removed
         consumer-params (assoc base-params :topic topic :partition partition)]
     (utils/safe-go
-     (log/infof "Wait for partition %s(%s) complete consuming" topic partition)
+     (trace/state-changed (:tracer kafka) (:group base-params) topic partition :wait-acks)
      (utils/<? (stop-fn))
-     (log/infof "Consuming of partition %s(%s) completed" topic partition)
+     (trace/state-changed (:tracer kafka) (:group base-params) topic partition :completed)
      (-> @(:curator kafka) .delete (.forPath (partition-path consumer-params))))))
 
 (defn apply-diff
   [kafka channels base-params consumers diff]
-  (let [{:keys [added removed]} diff]
+  (let [group (:group base-params)
+        {:keys [added removed]} diff]
     (utils/safe-go
      (let [consumers-with-added
            (loop [consumers consumers [[topic partition :as added-one] & tail] (seq added)]
              (if added-one
-               (if-let [[stop-fn init-offset  out]
-                        (utils/<? (apply-added kafka base-params added-one))]
-                 (do (a/>! channels {:topic topic
-                                     :partition partition
-                                     :init-offset init-offset
-                                     :chan out})
-                     (recur (assoc consumers added-one stop-fn) tail))
-                 (recur consumers tail))
+               (do
+                 (trace/state-changed (:tracer kafka) group topic partition :try-to-lock)
+                 (if-let [[stop-fn init-offset  out]
+                          (utils/<? (apply-added kafka base-params added-one))]
+                   (do (a/>! channels {:topic topic
+                                       :partition partition
+                                       :init-offset init-offset
+                                       :chan out})
+                       (trace/started (:tracer kafka) group topic partition init-offset)
+                       (trace/state-changed (:tracer kafka) group topic partition :started)
+                       (recur (assoc consumers added-one stop-fn) tail))
+                   (do (trace/state-changed (:tracer kafka) group topic partition :cant-lock)
+                       (recur consumers tail))))
                consumers))]
        (loop [consumers consumers-with-added [removed-one & tail] (seq removed)]
          (if removed-one
@@ -209,6 +218,7 @@
                                         :child-removed #(sort (disj (set %1) %2)))]
                                (update-in state [:everybody] op (:path event)))
                              (assoc state :everybody nil)))]
+    (trace/consumer-started (:tracer kafka) group topics)
     (a/go
       (loop [state {:everybody sorted-everybody :consumers {}}]
         (if (:everybody state)
@@ -222,15 +232,19 @@
                            (apply-diff kafka channels base-params (:consumers state))
                            (a/<!))]
                       (if (utils/throwable? new-consumers)
-                        (recur (assoc state :everybody nil))
+                        (do
+                          (trace/consumer-failed (:tracer kafka) group topics new-consumers)
+                          (recur (assoc state :everybody nil)))
                         (recur (assoc state :consumers new-consumers))))
                 nil (recur (assoc state :everybody nil))
                 (recur (update-everybody state event))))
             (recur (update-everybody state (a/<! consumer-changes))))
-          (do (log/info "Stop consumer" params)
-              (->> (stop-diff (:consumers state))
+          (do
+            (trace/consumer-stopped (:tracer kafka) group topics)
+            (->> (stop-diff (:consumers state))
                    (apply-diff kafka channels base-params (:consumers state))
                    (utils/<?))
               (a/close! close-wait-ch)))))
     [(fn [] (a/close! channels) (consumers-stop-fn) (a/<!! close-wait-ch))
      channels]))
+
