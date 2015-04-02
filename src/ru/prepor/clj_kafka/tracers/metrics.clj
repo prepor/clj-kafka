@@ -1,12 +1,8 @@
 (ns ru.prepor.clj-kafka.tracers.metrics
-  (:require [ru.prepor.clj-kafka.tracer :as trace]
+  (:require [com.stuartsierra.component :as component]
             [metrics.core :as metrics]
-            [metrics.gauges :refer [gauge-fn]]
-            [metrics.timers :as timers]
-            [metrics.counters :as counters]
             [metrics.meters :as meters]
-            [metrics.histograms :as historgram]
-            [com.stuartsierra.component :as component]))
+            [ru.prepor.clj-kafka.tracer :as trace]))
 
 ;; [1 2 3] => [[1] [1 2] [1 2 3]]
 (defn seq-reduction
