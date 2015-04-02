@@ -285,6 +285,15 @@
     (offset-write [_ group topic partition-id offset]
       (wcar config (car/set (redis-offset-key group topic partition-id) offset)))))
 
+(defn in-memory
+  []
+  (let [storage (atom {})]
+    (reify OffsetsStorage
+      (offset-read [_ group topic partition-id]
+        (get-in @storage [group topic partition-id]))
+      (offset-write [_ group topic partition-id offset]
+        (swap! storage assoc-in [group topic partition-id] offset)))))
+
 (defrecord Kafka [config pool storage curator host tracer]
   component/Lifecycle
   (start [this]
@@ -296,9 +305,6 @@
                           (.retryPolicy (ExponentialBackoffRetry. 100 10))
                           (.build)
                           (doto (.start) (.blockUntilConnected))))
-      :storage (cond
-                (get-in config [:storage :redis])
-                (new-redis (get-in config [:storage :redis])))
       :host (-> (InetAddress/getLocalHost)
                 (.getHostName))
       :tracer (or (:tracer this) (tracer/nil-tracer))))

@@ -14,8 +14,7 @@
 (def broker-config {:zookeeper-port 2182
                     :kafka-port 9093})
 
-(def config {:storage {:redis {:pool {} :spec {:host "127.0.0.1" :port 6379 :db 5}}}
-             :brokers-list ["localhost:9093"]
+(def config {:brokers-list ["localhost:9093"]
              :zookeeper {:namespace "test"
                          :connect-string "localhost:2182"}})
 (def producer-config {:brokers-list ["localhost:9093"]})
@@ -42,7 +41,11 @@
 
 (defn with-components
   [f]
-  (binding [*kafka* (component/start (assoc (kafka/new-kafka config) :tracer (tracer)))
+  (binding [*kafka* (component/start (assoc (kafka/new-kafka config)
+                                       :tracer (tracer)
+                                       :storage (kafka/new-redis
+                                                 {:pool {}
+                                                  :spec {:host "127.0.0.1" :port 6379 :db 5}})))
             *kafka-producer* (component/start (kafka/new-kafka-producer producer-config))]
     (try
       (f)
