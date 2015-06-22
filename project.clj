@@ -18,7 +18,6 @@
                  [com.stuartsierra/component "0.2.2"]
                  [com.taoensso/carmine "2.4.4"]
                  [ru.prepor/utils "0.2.0"]
-                 [metrics-clojure "2.4.0"]
                  [org.apache.zookeeper/zookeeper "3.4.6"
                   :exclusions [[com.sun.jmx/jmxri]
                                [com.sun.jdmk/jmxtools]
@@ -31,5 +30,7 @@
                  [org.apache.curator/curator-test "2.7.0"]]
   :profiles {:dev {:dependencies [[org.slf4j/slf4j-api "1.7.7"]
                                   [ch.qos.logback/logback-classic "1.1.2"]
-                                  [org.slf4j/log4j-over-slf4j "1.7.7"]]}}
+                                  [org.slf4j/log4j-over-slf4j "1.7.7"]
+                                  [metrics-clojure "2.4.0"]
+                                  [io.prometheus/simpleclient "0.0.9"]]}}
   :deploy-repositories [["releases" :clojars]])
