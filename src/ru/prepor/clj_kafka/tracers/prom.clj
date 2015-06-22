@@ -20,7 +20,7 @@
   component/Lifecycle
   (start [this] (assoc this :counter
                        (-> (Counter/build)
-                           (.name name)
+                           (.name "kafka_consumed_total")
                            (.help "kafka consumer metric")
                            (.labelNames (into-array ["group" "topic" "partition"]))
                            (.register))))
