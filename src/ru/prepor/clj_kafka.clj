@@ -212,9 +212,9 @@
                   (a/alt!
                     (a/timeout 1000) :next
                     control-ch :stopped))]
-            (case tick-result
-              :next (recur partition-meta offset)
-              :stopped (a/close! ch))))
+            (if (= :next tick-result)
+              (recur partition-meta offset)
+              (a/close! ch))))
         (catch Exception e
           (log/error e "Error while consuming" group topic partition-meta)
           (a/close! ch))))
