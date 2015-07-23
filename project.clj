@@ -32,5 +32,5 @@
                                   [ch.qos.logback/logback-classic "1.1.2"]
                                   [org.slf4j/log4j-over-slf4j "1.7.7"]
                                   [metrics-clojure "2.4.0"]
-                                  [io.prometheus/simpleclient "0.0.9"]]}}
+                                  [io.prometheus/simpleclient "0.0.10"]]}}
   :deploy-repositories [["releases" :clojars]])
