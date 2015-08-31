@@ -30,17 +30,14 @@
   (offset-read [this group topic partition-id])
   (offset-write [this group topic partition-id offset]))
 
-(defn ack
-  [message]
-  (when-let [clb (:ack-clb message)]
-    (clb message)))
-
 (defn commit
   [message]
-  (offset-write (get-in message [:kafka :storage])
-                (:group message) (:topic message) (:partition message)
-                (inc (:offset message)))
-  (ack message))
+  (utils/safe-go
+   (utils/<? (offset-write (get-in message [:kafka :storage])
+                           (:group message) (:topic message) (:partition message)
+                           (inc (:offset message))))
+   (when-let [clb (:ack-clb message)]
+     (utils/<? (clb message)))))
 
 (defn as-properties
   [m]
@@ -132,8 +129,9 @@
 
 (defn init-offset
   [kafka group topic partition offset-position]
-  (or (offset-read (:storage kafka) group topic (:id partition))
-      (init-offset* kafka topic partition offset-position)))
+  (utils/safe-go
+   (or (utils/<? (offset-read (:storage kafka) group topic (:id partition)))
+       (init-offset* kafka topic partition offset-position))))
 
 (defn partition-messages
   [kafka topic partition offset & [{:keys [ack-clb group]}]]
@@ -191,61 +189,63 @@
 (defn partition-consumer
   "Returns the core.async's channel. Stops consuming after control-ch closed"
   [kafka {:keys [topic partition control-ch ack-clb group init-offsets buf-or-n]}]
-  (let [ch (a/chan buf-or-n)
-        partition-meta (refresh-partition kafka topic partition)
-        init-offset (init-offset kafka group topic partition-meta init-offsets)]
-    (log/debug "Initialized parttion consumer" partition-meta init-offset)
-    (a/go
-      (try
-        (loop [partition-meta partition-meta offset init-offset]
-          (let [[messages partition-meta offset]
-                (partition-messages kafka topic partition-meta offset {:ack-clb ack-clb
-                                                                       :group group})
-                tick-result
-                (if (seq messages)
-                  (loop [[m & messages] messages]
-                    (if m
-                      (a/alt!
-                        [[ch m]] ([] (recur messages))
-                        control-ch :stopped)
-                      :next))
-                  (a/alt!
-                    (a/timeout 1000) :next
-                    control-ch :stopped))]
-            (if (= :next tick-result)
-              (recur partition-meta offset)
-              (a/close! ch))))
-        (catch Exception e
-          (log/error e "Error while consuming" group topic partition-meta)
-          (a/close! ch))))
-    [init-offset ch]))
+  (utils/safe-go
+   (let [ch (a/chan buf-or-n)
+         partition-meta (refresh-partition kafka topic partition)
+         init-offset (utils/<? (init-offset kafka group topic partition-meta init-offsets))]
+     (log/debug "Initialized parttion consumer" partition-meta init-offset)
+     (a/go
+       (try
+         (loop [partition-meta partition-meta offset init-offset]
+           (let [[messages partition-meta offset]
+                 (partition-messages kafka topic partition-meta offset {:ack-clb ack-clb
+                                                                        :group group})
+                 tick-result
+                 (if (seq messages)
+                   (loop [[m & messages] messages]
+                     (if m
+                       (a/alt!
+                         [[ch m]] ([] (recur messages))
+                         control-ch :stopped)
+                       :next))
+                   (a/alt!
+                     (a/timeout 1000) :next
+                     control-ch :stopped))]
+             (if (= :next tick-result)
+               (recur partition-meta offset)
+               (a/close! ch))))
+         (catch Exception e
+           (log/error e "Error while consuming" group topic partition-meta)
+           (a/close! ch))))
+     [init-offset ch])))
 
 (defn all-messages
   "Receives all messages in topics at the moment of call. After that closes channels"
   [kafka {:keys [group topics]}]
-  (let [m (topics-metadata kafka topics)
-        channels (a/chan)]
-    (doseq [t m
-            p (:partition-metadata t)
-            :let [ch (a/chan 100)
-                  topic (:topic t)
-                  init-offset (init-offset kafka group topic p :earliest)
-                  last-offset (init-offset* kafka topic p :latest)]]
-      (a/put! channels {:topic topic :partition (:id p)
-                        :init-offset init-offset :last-offset last-offset
-                        :chan ch})
-      (utils/safe-go
-       (loop [partition p offset init-offset]
-         (when (< offset last-offset)
-           (let [[messages partition offset]
-                 (partition-messages kafka topic partition offset)]
-             (when (seq messages)
-               (doseq [m messages]
-                 (a/>! ch m)))
-             (recur partition offset))))
-       (a/close! ch)))
-    (a/close! channels)
-    channels))
+  (utils/safe-go
+   (let [m (topics-metadata kafka topics)
+         channels (a/chan)]
+     (doseq [t m
+             p (:partition-metadata t)
+             :let [ch (a/chan 100)
+                   topic (:topic t)
+                   init-offset (a/<! (init-offset kafka group topic p :earliest))
+                   last-offset (init-offset* kafka topic p :latest)]]
+       (a/put! channels {:topic topic :partition (:id p)
+                         :init-offset init-offset :last-offset last-offset
+                         :chan ch})
+       (utils/safe-go
+        (loop [partition p offset init-offset]
+          (when (< offset last-offset)
+            (let [[messages partition offset]
+                  (partition-messages kafka topic partition offset)]
+              (when (seq messages)
+                (doseq [m messages]
+                  (a/>! ch m)))
+              (recur partition offset))))
+        (a/close! ch)))
+     (a/close! channels)
+     channels)))
 
 (defn channels->channel
   "Combines channel of channels to one channel"
@@ -256,9 +256,9 @@
        (if (seq channels-for-read)
          (let [[v port] (a/alts! channels-for-read)]
            (cond
-            (nil? v) (recur (-> (set channels-for-read) (disj port) vec))
-            (= channels port) (recur (conj channels-for-read (:chan v)))
-            :else (do (a/>! out v) (recur channels-for-read))))
+             (nil? v) (recur (-> (set channels-for-read) (disj port) vec))
+             (= channels port) (recur (conj channels-for-read (:chan v)))
+             :else (do (a/>! out v) (recur channels-for-read))))
          (a/close! out))))
     out))
 
@@ -280,34 +280,37 @@
   [config]
   (reify OffsetsStorage
     (offset-read [_ group topic partition-id]
-      (when-let [res (wcar config (car/get (redis-offset-key group topic partition-id)))]
-        (Long/valueOf res)))
+      (a/go
+        (when-let [res (wcar config (car/get (redis-offset-key group topic partition-id)))]
+          (Long/valueOf res))))
     (offset-write [_ group topic partition-id offset]
-      (wcar config (car/set (redis-offset-key group topic partition-id) offset)))))
+      (a/go
+        (wcar config (car/set (redis-offset-key group topic partition-id) offset))))))
 
 (defn in-memory
   []
   (let [storage (atom {})]
     (reify OffsetsStorage
       (offset-read [_ group topic partition-id]
-        (get-in @storage [group topic partition-id]))
+        (a/go (get-in @storage [group topic partition-id])))
       (offset-write [_ group topic partition-id offset]
-        (swap! storage assoc-in [group topic partition-id] offset)))))
+        (a/go (swap! storage assoc-in [group topic partition-id] offset))))))
 
 (defrecord Kafka [config pool storage curator host tracer]
   component/Lifecycle
   (start [this]
     (assoc this
-      :pool (atom {})
-      :curator (delay (-> (CuratorFrameworkFactory/builder)
-                          (.namespace (get-in config [:zookeeper :namespace]))
-                          (.connectString (get-in config [:zookeeper :connect-string]))
-                          (.retryPolicy (ExponentialBackoffRetry. 100 10))
-                          (.build)
-                          (doto (.start) (.blockUntilConnected))))
-      :host (-> (InetAddress/getLocalHost)
-                (.getHostName))
-      :tracer (or (:tracer this) (tracer/nil-tracer))))
+           :pool (atom {})
+           :curator (delay (-> (CuratorFrameworkFactory/builder)
+                               (.namespace (get-in config [:zookeeper :namespace]))
+                               (.connectString (get-in config [:zookeeper :connect-string]))
+                               (.retryPolicy (ExponentialBackoffRetry. 100 10))
+                               (.build)
+                               (doto (.start) (.blockUntilConnected))))
+           :worker-registry (atom {})
+           :host (-> (InetAddress/getLocalHost)
+                     (.getHostName))
+           :tracer (or (:tracer this) (tracer/nil-tracer))))
   (stop [this]
     (doseq [[_ v] @pool]
       (.close v))
@@ -343,7 +346,7 @@
   component/Lifecycle
   (start [this]
     (assoc this
-      :pool (GenericObjectPool. (kafka-producer-factory config))))
+           :pool (GenericObjectPool. (kafka-producer-factory config))))
   (stop [this]
     (.close pool)
     this)
