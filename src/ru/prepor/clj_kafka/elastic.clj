@@ -119,7 +119,10 @@
     out))
 
 ;; Получет сообщение из buffered-messages-ch (кафка) и отправляет в
-;; messages-ch (канал, который читает клиентский код). В acks-ch складываются полученные аки, от control-ch всегда стоит ожидать закрытия. В таком случае мы дожидаемся ака из acks-ch соответсвующего последнему отправленному сообщению и закрываем канал
+;; messages-ch (канал, который читает клиентский код). В acks-ch складываются
+;; полученные аки, от control-ch всегда стоит ожидать закрытия. В таком случае
+;; мы дожидаемся ака из acks-ch соответсвующего последнему отправленному
+;; сообщению и закрываем канал
 (defn partition-worker
   [control-ch acks-ch buffered-messages-ch messages-ch {:keys [message-clb registry-clb]}]
   (a/go-loop [state {:last-ack 0 :last-offset nil :completing? false}]
