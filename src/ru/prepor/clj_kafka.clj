@@ -30,6 +30,13 @@
   (offset-read [this group topic partition-id])
   (offset-write [this group topic partition-id offset]))
 
+(defn ack
+  [message]
+  (utils/safe-go
+   (when-let [clb (:ack-clb message)]
+     (utils/<? (clb message)))))
+
+
 (defn commit
   [message]
   (utils/safe-go
