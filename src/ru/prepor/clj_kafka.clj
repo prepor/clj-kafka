@@ -264,13 +264,14 @@
 
 (defn status
   [kafka group topics]
-  (for [t (topics-metadata kafka topics)
-        p (:partition-metadata t)
-        :let [topic (:topic t)
-              log (init-offset* kafka topic p :latest)
-              offset (or (offset-read (:storage kafka) group topic (:id p)) 0)]
-        :let [lag (- log offset)]]
-    {:topic topic :partition (:id p) :offset offset :log log :lag lag}))
+  (utils/safe-go
+    (for [t (topics-metadata kafka topics)
+          p (:partition-metadata t)
+          :let [topic (:topic t)
+                log (init-offset* kafka topic p :latest)
+                offset (or (utils/<? (offset-read (:storage kafka) group topic (:id p))) 0)]
+          :let [lag (- log offset)]]
+      {:topic topic :partition (:id p) :offset offset :log log :lag lag})))
 
 (defn redis-offset-key
   [group topic partition-id]
