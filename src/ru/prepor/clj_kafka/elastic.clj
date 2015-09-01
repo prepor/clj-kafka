@@ -159,12 +159,13 @@
         message-clb #(trace/message-received (:tracer kafka) group topic id %)
         registry-clb #(let [data-only (update-in % [:current-message] dissoc :kafka :ack-clb)]
                         (swap! (:worker-registry kafka) assoc [group topic id] data-only))
-        partition-consumer-params {:topic topic
-                                  :partition id
-                                  :init-offsets init-offsets
-                                  :control-ch control-ch
-                                  :ack-clb ack-clb
-                                  :buf-or-n 50}
+        partition-consumer-params {:group group
+                                   :topic topic
+                                   :partition id
+                                   :init-offsets init-offsets
+                                   :control-ch control-ch
+                                   :ack-clb ack-clb
+                                   :buf-or-n 50}
         worker-go (a/go
                     (let [[init-offset buffered-messages-ch]
                           (a/<! (core/partition-consumer kafka partition-consumer-params))

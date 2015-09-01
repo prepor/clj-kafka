@@ -79,7 +79,7 @@
   (stop [this] this)
   kafka/OffsetsStorage
   (offset-read [this group topic partition-id]
-    (get @offsets [group topic partition-id]))
+    (a/go (get @offsets [group topic partition-id])))
   (offset-write [this group topic partition-id offset]
     (a/go
       (swap! offsets assoc [group topic partition-id] offset)
