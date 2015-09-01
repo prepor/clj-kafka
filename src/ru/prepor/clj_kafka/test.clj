@@ -7,7 +7,10 @@
            [kafka.admin AdminUtils]
            [kafka.server KafkaConfig KafkaServer]
            [org.apache.commons.io FileUtils])
-  (:require [clojure.java.io :as io]))
+  (:require [clojure.java.io :as io]
+            [ru.prepor.clj-kafka :as kafka]
+            [clojure.core.async :as a]
+            [com.stuartsierra.component :as component]))
 
 (def system-time (proxy [kafka.utils.Time] []
                    (milliseconds [] (System/currentTimeMillis))
@@ -66,3 +69,22 @@
                      (.awaitShutdown kafka)
                      (.stop zk)
                      (FileUtils/deleteDirectory (io/file (tmp-dir)))))))))
+
+(defrecord StubbedStorage [commits offsets]
+  component/Lifecycle
+  (start [this]
+    (assoc this
+           :offsets (atom (:init-offsets this {}))
+           :commits (a/chan)))
+  (stop [this] this)
+  kafka/OffsetsStorage
+  (offset-read [this group topic partition-id]
+    (get @offsets [group topic partition-id]))
+  (offset-write [this group topic partition-id offset]
+    (a/go
+      (swap! offsets assoc [group topic partition-id] offset)
+      (a/>! commits {:group group :topic topic :partition-id partition-id :offset offset}))))
+
+(defn stubbed-storage
+  [init-offsets]
+  (map->StubbedStorage {:init-offsets init-offsets}))
