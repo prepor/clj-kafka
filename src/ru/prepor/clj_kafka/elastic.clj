@@ -148,7 +148,9 @@
                         ;; только для мониторинга
                         (message-clb offset)
                         (recur (assoc state :last-offset offset :current-message nil)))
-          buffered-messages-ch  (recur (assoc state :current-message val)))))))
+          buffered-messages-ch (if val
+                                 (recur (assoc state :current-message val))
+                                 (recur state)))))))
 
 (defn start-partition*
   [kafka channels group init-offsets {:keys [topic id]}]
@@ -194,7 +196,6 @@
   [kafka channels group init-offsets {:keys [topic id] :as partition}]
   (let [path (partition-path group topic id)
         stop-ch (a/chan)
-        stopper #(a/close! stop-ch)
         tick (fn [] (try
                      (->  @(:curator kafka)
                           .create
