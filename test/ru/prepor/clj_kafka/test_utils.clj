@@ -22,36 +22,25 @@
 (defn async-res
   ([ch] (async-res ch 5))
   ([ch seconds]
-     (a/alt!!
-       (a/timeout (* seconds 5000)) (throw (Exception. "Timeout"))
-       ch ([v ch] (utils/safe-res v)))))
-
-(defn with-truncated-redis
-  [f]
-  (wcar (:redis config) (car/flushall))
-  (f))
+   (a/alt!!
+     (a/timeout (* seconds 5000)) (throw (Exception. "Timeout"))
+     ch ([v ch] (utils/safe-res v)))))
 
 (def ^:dynamic *kafka*)
 (def ^:dynamic *kafka-producer*)
 
-(defn tracer []
-  (-> (pub-tracer) (assoc :state (component/start (state-tracer))
-                          :log (component/start (log-tracer)))
-      (component/start)))
+(defn test-consumer [] (kafka/kafka config))
+(defn test-producer [] (kafka/kafka-producer producer-config))
 
 (defn with-components
   [f]
-  (binding [*kafka* (component/start (assoc (kafka/new-kafka config)
-                                       :tracer (tracer)
-                                       :storage (kafka/new-redis
-                                                 {:pool {}
-                                                  :spec {:host "127.0.0.1" :port 6379 :db 5}})))
-            *kafka-producer* (component/start (kafka/new-kafka-producer producer-config))]
-    (try
-      (f)
-      (finally
-        (component/stop *kafka*)
-        (component/stop *kafka-producer*)))))
+  (let [system (defcomponent/system [test-consumer test-producer] {:start true})]
+    (binding [*kafka* (get system test-consumer)
+              *kafka-producer* (get system test-producer)]
+      (try
+        (f)
+        (finally
+          (component/stop system))))))
 
 
 (defn with-test-broker
@@ -60,4 +49,4 @@
 
 (defn with-env
   [f]
-  ((join-fixtures [with-truncated-redis with-test-broker with-components]) f))
+  ((join-fixtures [with-test-broker with-components]) f))

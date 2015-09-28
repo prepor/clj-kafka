@@ -1,4 +1,5 @@
-(ns ru.prepor.clj-kafka.tracer)
+(ns ru.prepor.clj-kafka.tracer
+  (:require [defcomponent :refer [defcomponent]]))
 
 (defprotocol Tracer
   (started [this group topic partition init-offset])
@@ -11,7 +12,8 @@
   (consumer-failed [this group topics exception])
   (consumer-stopped [this group topics]))
 
-(defrecord NilTracer []
+(defcomponent nil-tracer []
+  []
   Tracer
   (started [this group topic partition init-offset])
   (state-changed [this group topic partition state])
@@ -22,4 +24,3 @@
   (consumer-failed [this topics group exception])
   (consumer-stopped [this topics group]))
 
-(defn nil-tracer [] (map->NilTracer {}))

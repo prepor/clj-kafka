@@ -18,6 +18,7 @@
                  [com.stuartsierra/component "0.2.2"]
                  [com.taoensso/carmine "2.4.4"]
                  [ru.prepor/utils "0.2.0"]
+                 [defcomponent "0.1.4"]
                  [org.apache.zookeeper/zookeeper "3.4.6"
                   :exclusions [[com.sun.jmx/jmxri]
                                [com.sun.jdmk/jmxtools]

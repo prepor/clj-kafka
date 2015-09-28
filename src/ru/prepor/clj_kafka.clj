@@ -3,9 +3,9 @@
             [clojure.core.async :as a]
             [clojure.string :as str]
             [clojure.tools.logging :as log]
-            [com.stuartsierra.component :as component]
             [ru.prepor.utils :as utils]
             [ru.prepor.clj-kafka.tracer :as tracer]
+            [defcomponent :refer [defcomponent]]
             [taoensso.carmine :as car :refer (wcar)])
   (:import [java.nio ByteBuffer]
            [java.util Properties HashMap]
@@ -35,7 +35,6 @@
   (utils/safe-go
    (when-let [clb (:ack-clb message)]
      (utils/<? (clb message)))))
-
 
 (defn commit
   [message]
@@ -291,51 +290,51 @@
   [group topic partition-id]
   (format "kafka-offsets:%s-%s-%s" group topic partition-id))
 
-(defn new-redis
+(defcomponent redis []
   [config]
-  (reify OffsetsStorage
-    (offset-read [_ group topic partition-id]
-      (a/go
-        (when-let [res (wcar config (car/get (redis-offset-key group topic partition-id)))]
-          (Long/valueOf res))))
-    (offset-write [_ group topic partition-id offset]
-      (a/go
-        (wcar config (car/set (redis-offset-key group topic partition-id) offset))))))
+  OffsetsStorage
+  (offset-read [_ group topic partition-id]
+               (a/go
+                 (when-let [res (wcar config (car/get (redis-offset-key group topic partition-id)))]
+                   (Long/valueOf res))))
+  (offset-write [_ group topic partition-id offset]
+                (a/go
+                  (wcar config (car/set (redis-offset-key group topic partition-id) offset)))))
 
-(defn in-memory
+(defcomponent in-memory []
   []
-  (let [storage (atom {})]
-    (reify OffsetsStorage
-      (offset-read [_ group topic partition-id]
-        (a/go (get-in @storage [group topic partition-id])))
-      (offset-write [_ group topic partition-id offset]
-        (a/go (swap! storage assoc-in [group topic partition-id] offset))))))
+  (start
+   [this]
+   (assoc this :storage (atom {})))
+  (stop [this] this)
+  OffsetsStorage
+  (offset-read
+   [this group topic partition-id]
+   (a/go (get-in @(:storage this) [group topic partition-id])))
+  (offset-write
+   [this group topic partition-id offset]
+   (a/go (swap! (:storage this) assoc-in [group topic partition-id] offset))))
 
-(defrecord Kafka [config pool storage curator host tracer]
-  component/Lifecycle
-  (start [this]
-    (assoc this
-           :pool (atom {})
-           :curator (delay (-> (CuratorFrameworkFactory/builder)
-                               (.namespace (get-in config [:zookeeper :namespace]))
-                               (.connectString (get-in config [:zookeeper :connect-string]))
-                               (.retryPolicy (ExponentialBackoffRetry. 100 10))
-                               (.build)
-                               (doto (.start) (.blockUntilConnected))))
-           :worker-registry (atom {})
-           :host (-> (InetAddress/getLocalHost)
-                     (.getHostName))
-           :tracer (or (:tracer this) (tracer/nil-tracer))))
-  (stop [this]
-    (doseq [[_ v] @pool]
-      (.close v))
-    (when (realized? curator)
-      (.close @curator))
-    this))
-
-(defn new-kafka
+(defcomponent kafka [[:dependant tracer/nil-tracer :tracer] [:dependant in-memory :storage]]
   [config]
-  (map->Kafka {:config config}))
+  (start [this]
+         (assoc this
+                :pool (atom {})
+                :curator (delay (-> (CuratorFrameworkFactory/builder)
+                                    (.namespace (get-in config [:zookeeper :namespace]))
+                                    (.connectString (get-in config [:zookeeper :connect-string]))
+                                    (.retryPolicy (ExponentialBackoffRetry. 100 10))
+                                    (.build)
+                                    (doto (.start) (.blockUntilConnected))))
+                :worker-registry (atom {})
+                :host (-> (InetAddress/getLocalHost)
+                          (.getHostName))))
+  (stop [this]
+        (doseq [[_ v] @(:pool this)]
+          (.close v))
+        (when (realized? (:curator this))
+          (.close @(:curator this)))
+        this))
 
 (defn kafka-producer-factory
   [config]
@@ -357,23 +356,21 @@
 (defprotocol KafkaSend
   (send [_ messages]))
 
-(defrecord KafkaProducer [config pool]
-  component/Lifecycle
-  (start [this]
-    (assoc this
-           :pool (GenericObjectPool. (kafka-producer-factory config))))
-  (stop [this]
-    (.close pool)
-    this)
-  KafkaSend
-  (send [_ messages]
-    (let [producer (.borrowObject pool)]
-      (try
-        (.send producer (for [{:keys [topic key value]} messages]
-                          (KeyedMessage. topic key value)))
-        (finally
-          (.returnObject pool producer))))))
-
-(defn new-kafka-producer
+(defcomponent kafka-producer []
   [config]
-  (map->KafkaProducer {:config config}))
+  (start
+   [this]
+   (assoc this
+          :pool (GenericObjectPool. (kafka-producer-factory config))))
+  (stop [this]
+        (.close (:pool this))
+        this)
+  KafkaSend
+  (send
+   [this messages]
+   (let [producer (.borrowObject (:pool this))]
+     (try
+       (.send producer (for [{:keys [topic key value]} messages]
+                         (KeyedMessage. topic key value)))
+       (finally
+         (.returnObject (:pool this) producer))))))
