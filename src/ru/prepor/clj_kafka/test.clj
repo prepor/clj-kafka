@@ -1,16 +1,16 @@
 (ns ru.prepor.clj-kafka.test
   (:import [java.util Properties]
+           [kafka.admin AdminUtils]
+           [kafka.common TopicAndPartition]
+           [kafka.server KafkaConfig KafkaServer]
            [org.I0Itec.zkclient ZkClient]
            [org.I0Itec.zkclient.serialize ZkSerializer]
-           [org.apache.curator.test TestingServer]
-           [kafka.common TopicAndPartition]
-           [kafka.admin AdminUtils]
-           [kafka.server KafkaConfig KafkaServer]
-           [org.apache.commons.io FileUtils])
-  (:require [clojure.java.io :as io]
-            [ru.prepor.clj-kafka :as kafka]
-            [clojure.core.async :as a]
-            [com.stuartsierra.component :as component]))
+           [org.apache.commons.io FileUtils]
+           [org.apache.curator.test TestingServer])
+  (:require [clojure.core.async :as a]
+            [clojure.java.io :as io]
+            [com.stuartsierra.component :as component]
+            [ru.prepor.clj-kafka :as kafka]))
 
 (def system-time (proxy [kafka.utils.Time] []
                    (milliseconds [] (System/currentTimeMillis))

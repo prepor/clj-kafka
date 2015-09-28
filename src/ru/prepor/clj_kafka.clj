@@ -3,11 +3,12 @@
             [clojure.core.async :as a]
             [clojure.string :as str]
             [clojure.tools.logging :as log]
-            [ru.prepor.utils :as utils]
-            [ru.prepor.clj-kafka.tracer :as tracer]
             [defcomponent :refer [defcomponent]]
-            [taoensso.carmine :as car :refer (wcar)])
-  (:import [java.nio ByteBuffer]
+            [ru.prepor.clj-kafka.tracer :as tracer]
+            [ru.prepor.utils :as utils]
+            [taoensso.carmine :as car :refer [wcar]])
+  (:import [java.net InetAddress]
+           [java.nio ByteBuffer]
            [java.util Properties HashMap]
            [kafka.api FetchRequestBuilder PartitionOffsetRequestInfo]
            [kafka.cluster Broker]
@@ -20,8 +21,7 @@
            [org.apache.commons.pool2 PooledObjectFactory]
            [org.apache.commons.pool2.impl GenericObjectPool DefaultPooledObject]
            [org.apache.curator.framework CuratorFrameworkFactory]
-           [org.apache.curator.retry ExponentialBackoffRetry]
-           [java.net InetAddress])
+           [org.apache.curator.retry ExponentialBackoffRetry])
   (:refer-clojure :exclude [send]))
 
 (defrecord Message [kafka ack-clb group topic partition offset key value])

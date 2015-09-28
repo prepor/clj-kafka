@@ -1,11 +1,9 @@
 (ns ru.prepor.clj-kafka.elastic-test
   (:require [clojure.core.async :as a]
             [clojure.test :refer :all]
-            [ru.prepor.clj-kafka.tracers.state :as state-tracer]
             [ru.prepor.clj-kafka :as kafka]
             [ru.prepor.clj-kafka.elastic :as elastic]
-            [ru.prepor.clj-kafka.test-utils :refer [*kafka* *kafka-producer*
-                                                    with-env async-res]]))
+            [ru.prepor.clj-kafka.test-utils :refer [*kafka* *kafka-producer* with-env async-res]]))
 
 (use-fixtures :each with-env)
 

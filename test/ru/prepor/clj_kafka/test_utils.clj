@@ -1,15 +1,10 @@
 (ns ru.prepor.clj-kafka.test-utils
-  (:require [clojure.test :as test]
-            [ru.prepor.utils :as utils]
+  (:require [clojure.core.async :as a]
             [clojure.test :refer :all]
-            [ru.prepor.clj-kafka :as kafka]
-            [ru.prepor.clj-kafka.tracers.pub :refer [pub-tracer]]
-            [ru.prepor.clj-kafka.tracers.state :refer [state-tracer]]
-            [ru.prepor.clj-kafka.tracers.log :refer [log-tracer]]
             [com.stuartsierra.component :as component]
-            [taoensso.carmine :as car :refer [wcar]]
+            [ru.prepor.clj-kafka :as kafka]
             [ru.prepor.clj-kafka.test :as test-kafka]
-            [clojure.core.async :as a]))
+            [ru.prepor.utils :as utils]))
 
 (def broker-config {:zookeeper-port 2182
                     :kafka-port 9093})

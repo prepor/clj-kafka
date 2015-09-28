@@ -1,10 +1,8 @@
 (ns ru.prepor.clj-kafka-test
-  (:require [ru.prepor.clj-kafka :as kafka]
-            [ru.prepor.utils :as utils]
-            [clojure.core.async :as a]
-            [ru.prepor.clj-kafka.test-utils :refer [with-env *kafka-producer* *kafka*
-                                                    async-res]]
-            [clojure.test :refer :all]))
+  (:require [clojure.core.async :as a]
+            [clojure.test :refer :all]
+            [ru.prepor.clj-kafka :as kafka]
+            [ru.prepor.clj-kafka.test-utils :refer [with-env *kafka-producer* *kafka* async-res]]))
 
 (use-fixtures :each with-env)
 

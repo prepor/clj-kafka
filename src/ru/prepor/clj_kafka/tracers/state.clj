@@ -1,7 +1,6 @@
 (ns ru.prepor.clj-kafka.tracers.state
-  (:require [ru.prepor.clj-kafka.tracer :as trace]
-            [defcomponent :refer [defcomponent]]
-            [com.stuartsierra.component :as component]))
+  (:require [defcomponent :refer [defcomponent]]
+            [ru.prepor.clj-kafka.tracer :as trace]))
 
 ;; we assumed that we have only one consumer per group
 (defcomponent state-tracer []

@@ -1,8 +1,7 @@
 (ns ru.prepor.clj-kafka.tracers.prom
   "Prometheus metrics"
-  (:require [ru.prepor.clj-kafka.tracer :as trace]
-            [defcomponent :refer [defcomponent]]
-            [com.stuartsierra.component :as component])
+  (:require [defcomponent :refer [defcomponent]]
+            [ru.prepor.clj-kafka.tracer :as trace])
   (:import [io.prometheus.client Counter]))
 
 (defcomponent metrics-tracer []

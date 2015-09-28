@@ -1,7 +1,6 @@
 (ns ru.prepor.clj-kafka.tracers.pub
-  (:require [ru.prepor.clj-kafka.tracer :as trace]
-            [defcomponent :refer [defcomponent]]
-            [com.stuartsierra.component :as component]))
+  (:require [defcomponent :refer [defcomponent]]
+            [ru.prepor.clj-kafka.tracer :as trace]))
 
 (defcomponent pub-tracer []
   []
