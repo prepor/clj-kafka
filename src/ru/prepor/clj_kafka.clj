@@ -315,7 +315,7 @@
    [this group topic partition-id offset]
    (a/go (swap! (:storage this) assoc-in [group topic partition-id] offset))))
 
-(defcomponent kafka [[:dependant tracer/nil-tracer :tracer] [:dependant in-memory :storage]]
+(defcomponent kafka []
   [config]
   (start [this]
          (assoc this

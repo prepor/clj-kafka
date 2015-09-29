@@ -3,6 +3,7 @@
             [clojure.test :refer :all]
             [com.stuartsierra.component :as component]
             [ru.prepor.clj-kafka :as kafka]
+            [ru.prepor.clj-kafka.tracer :as tracer]
             [ru.prepor.clj-kafka.test :as test-kafka]
             [ru.prepor.utils :as utils]))
 
@@ -24,7 +25,10 @@
 (def ^:dynamic *kafka*)
 (def ^:dynamic *kafka-producer*)
 
-(defn test-consumer [] (kafka/kafka config))
+(defn test-consumer []
+  (-> (kafka/kafka)
+      (assoc :defcomponent/specs [:dependant tracer/nil-tracer :tracer] [:dependant kafka/in-memory :storage])))
+
 (defn test-producer [] (kafka/kafka-producer producer-config))
 
 (defn with-components
