@@ -26,7 +26,7 @@
 (def ^:dynamic *kafka-producer*)
 
 (defn test-consumer []
-  (-> (kafka/kafka)
+  (-> (kafka/kafka config)
       (assoc :defcomponent/specs [:dependant tracer/nil-tracer :tracer] [:dependant kafka/in-memory :storage])))
 
 (defn test-producer [] (kafka/kafka-producer producer-config))
