@@ -147,23 +147,24 @@
                 (.build))
         to-message (fn [m]
                      (let [offset (.offset m)
-                           msg (.message m)
-                           payload-byte-buffer (.payload msg)
-                           payload-byte-array (byte-array (.remaining payload-byte-buffer))
-                           key-byte-buffer (.key msg)
-                           key-byte-array (when key-byte-buffer
-                                            (byte-array (.remaining key-byte-buffer)))]
-                       (.get payload-byte-buffer payload-byte-array)
-                       (when key-byte-buffer
-                         (.get key-byte-buffer key-byte-array))
-                       (map->Message {:kafka kafka
-                                      :group group
-                                      :ack-clb ack-clb
-                                      :topic topic
-                                      :offset offset
-                                      :partition (:id partition)
-                                      :key key-byte-array
-                                      :value payload-byte-array})))
+                           msg (.message m)]
+                       ;; empty messages are possible in kafka
+                       (when-let [payload-byte-buffer (.payload msg)]
+                         (let [payload-byte-array (byte-array (.remaining payload-byte-buffer))
+                               key-byte-buffer (.key msg)
+                               key-byte-array (when key-byte-buffer
+                                                (byte-array (.remaining key-byte-buffer)))]
+                           (.get payload-byte-buffer payload-byte-array)
+                           (when key-byte-buffer
+                             (.get key-byte-buffer key-byte-array))
+                           (map->Message {:kafka kafka
+                                          :group group
+                                          :ack-clb ack-clb
+                                          :topic topic
+                                          :offset offset
+                                          :partition (:id partition)
+                                          :key key-byte-array
+                                          :value payload-byte-array})))))
         res (request kafka (:leader partition) #(.fetch % req))]
     (if (or (nil? res) (.hasError res))
       ;; in case of error just returns empty messages coll and reinit broker's info
@@ -174,7 +175,8 @@
         [[] (refresh-partition kafka topic (:id partition)) offset])
       (let [messages (-> res (.messageSet topic (:id partition))
                          (.iterator) iterator-seq
-                         (->> (mapv to-message)))]
+                         (->> (keep to-message)
+                              (into [])))]
         ;; (log/debugf "Received %s messages from %s(%s) with offset %s" (count messages)
         ;;             topic partition offset)
         [messages partition (if (seq messages) (inc (:offset (last messages))) offset)]))))
