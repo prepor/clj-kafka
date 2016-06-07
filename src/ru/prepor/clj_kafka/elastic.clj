@@ -153,7 +153,7 @@
                                  (recur state)))))))
 
 (defn start-partition*
-  [kafka channels group init-offsets {:keys [topic id]}]
+  [kafka channels group init-offsets buf-or-n {:keys [topic id]}]
   (let [messages-ch (a/chan)
         control-ch (a/chan)
         acks-ch (a/chan)
@@ -167,7 +167,7 @@
                                    :init-offsets init-offsets
                                    :control-ch control-ch
                                    :ack-clb ack-clb
-                                   :buf-or-n 50}
+                                   :buf-or-n (or buf-or-n 50)}
         worker-go (a/go
                     (let [[init-offset buffered-messages-ch]
                           (a/<! (core/partition-consumer kafka partition-consumer-params))
@@ -193,7 +193,7 @@
 ;; Пытаемся залочить партишен, но не забываем смотреть на контрольный канал, в
 ;; котором нам могут приказать перестать это делать.
 (defn start-partition
-  [kafka channels group init-offsets {:keys [topic id] :as partition}]
+  [kafka channels group init-offsets buf-or-n {:keys [topic id] :as partition}]
   (let [path (partition-path group topic id)
         stop-ch (a/chan)
         tick (fn [] (try
@@ -202,7 +202,7 @@
                           (.creatingParentsIfNeeded)
                           (.withMode CreateMode/EPHEMERAL)
                           (.forPath path (.getBytes (:host kafka))))
-                     (start-partition* kafka channels group init-offsets partition)
+                     (start-partition* kafka channels group init-offsets buf-or-n partition)
                      (catch KeeperException$NodeExistsException e
                        (log/warn "Zookeeper path already exists" path)
                        nil)))
@@ -221,12 +221,13 @@
 ;; обязательно. Если какой-то другой консьюмер решил, что ему нужен этот
 ;; партишен, а мы решим это только следующим шагом, то зависнем здесь навсегда
 (defn partitions-supervisor
-  [kafka group init-offsets partitions-changes-ch]
+  [kafka group init-offsets buf-or-n partitions-changes-ch]
   (let [channels (a/chan)]
     (a/go-loop [partition-stoppers {}]
       (if-let [command (a/<! partitions-changes-ch)]
         (case (:type command)
-          :add (let [stopper (start-partition kafka channels group init-offsets (:partition command))]
+          :add (let [stopper (start-partition kafka channels group
+                                              init-offsets buf-or-n (:partition command))]
                  (recur (assoc partition-stoppers (:partition command) stopper)))
           :remove (let [partition-stopper (partition-stoppers (:partition command))]
                     (a/<! (partition-stopper))
@@ -258,12 +259,12 @@
 ;; Остановка консьюмера начинается с головы и продоходит по всей цепочке.
 ;; Завершением остановки следует считать закрытие channels-канала
 (defn consumer
-  [kafka {:keys [group topics init-offsets] :as params :or {init-offsets :latest}}]
+  [kafka {:keys [group topics init-offsets buf-or-n] :as params :or {init-offsets :latest}}]
   (let [me (introduce-myself kafka group)
         partitions (all-partitions kafka topics)
         initialized-zk-path (a/<!! (initialized-zookeeper-path @(:curator kafka) (format "/consumers/%s" group)))
         [stop-watch-consumers initial-consumers zk-consumers-ch] initialized-zk-path
         consumers-ch (consumers-accumulator initial-consumers zk-consumers-ch)
         partitions-changes-ch (partitions-solver consumers-ch me partitions)
-        channels (partitions-supervisor kafka group init-offsets partitions-changes-ch)]
+        channels (partitions-supervisor kafka group init-offsets buf-or-n partitions-changes-ch)]
     [stop-watch-consumers channels]))
